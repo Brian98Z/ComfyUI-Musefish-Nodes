@@ -23,6 +23,8 @@ from typing_extensions import override
 
 
 _LATENT_FORMATS = ["flux", "sd3", "sdxl", "qwenimage"]
+_MODEL_LONG_EDGE = 1024
+_MODEL_SCALE = 4
 
 
 def _latent_format(name: str):
@@ -89,8 +91,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                 io.Vae.Input("encode_vae"),
                 io.String.Input("positive_prompt", default="high quality, ultra detailed, sharp details", multiline=True),
                 io.Int.Input("batch_size", default=2, min=1, max=64, step=1),
-                io.Int.Input("model_long_edge", default=1024, min=256, max=4096, step=16),
-                io.Int.Input("upscale_factor", default=4, min=2, max=8, step=1),
+                io.Int.Input("upscale_factor", default=4, min=2, max=4, step=1),
                 io.Combo.Input("latent_format", options=_LATENT_FORMATS, default="flux"),
                 io.Float.Input("degrade_sigma", default=0.0, min=0.0, max=1.0, step=0.01),
                 io.Float.Input("cfg", default=1.0, min=0.0, max=30.0, step=0.1),
@@ -113,7 +114,6 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
         encode_vae,
         positive_prompt: str,
         batch_size: int,
-        model_long_edge: int,
         upscale_factor: int,
         latent_format: str,
         degrade_sigma: float,
@@ -138,13 +138,15 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
         if frame_count == 0:
             raise ValueError("IMAGE batch contains no frames")
 
-        # Normalize once. All batches use identical dimensions, so the model and
-        # VAE never receive a changing shape during this execution.
-        scale = float(model_long_edge) / max(source_h, source_w)
+        # PiD is trained for a fixed 1024 -> 4096 path. The user-facing
+        # factor only controls the final delivery resize after decoding.
+        scale = float(_MODEL_LONG_EDGE) / max(source_h, source_w)
         model_h = _round_multiple(int(round(source_h * scale)))
         model_w = _round_multiple(int(round(source_w * scale)))
-        target_h = model_h * int(upscale_factor)
-        target_w = model_w * int(upscale_factor)
+        model_target_h = model_h * _MODEL_SCALE
+        model_target_w = model_w * _MODEL_SCALE
+        output_h = model_h * int(upscale_factor)
+        output_w = model_w * int(upscale_factor)
 
         lowres_latents: list[torch.Tensor] = []
         with torch.inference_mode():
@@ -172,22 +174,23 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
         comfy.model_management.load_models_gpu([model], force_full_load=True)
 
         output_chunks: list[torch.Tensor] = []
+        noise_template: torch.Tensor | None = None
         latent_device = comfy.model_management.intermediate_device()
         with torch.inference_mode():
             for batch_index, lowres_cpu in enumerate(lowres_latents):
                 lowres = lowres_cpu.to(latent_device)
                 current_batch = lowres.shape[0]
                 latent_image = torch.zeros(
-                    (current_batch, 3, target_h, target_w),
+                    (current_batch, 3, model_target_h, model_target_w),
                     device=latent_device,
                     dtype=lowres.dtype,
                 )
                 positive_pid = _pid_conditioning(
                     positive, lowres, latent_format, degrade_sigma
                 )
-                noise = comfy.sample.prepare_noise(
-                    latent_image, int(seed) + batch_index
-                )
+                if noise_template is None:
+                    noise_template = comfy.sample.prepare_noise(latent_image[:1], int(seed))
+                noise = noise_template.repeat(current_batch, 1, 1, 1)
                 samples = comfy.sample.sample_custom(
                     model,
                     noise,
@@ -198,9 +201,13 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                     negative,
                     latent_image,
                     disable_pbar=False,
-                    seed=int(seed) + batch_index,
+                    seed=int(seed),
                 )
                 decoded = decode_vae.decode(samples).detach().float().cpu()
+                if int(upscale_factor) != _MODEL_SCALE:
+                    decoded = comfy.utils.common_upscale(
+                        decoded.movedim(-1, 1), output_w, output_h, "area", "disabled"
+                    ).movedim(1, -1)
                 output_chunks.append(decoded[:, :, :, :3].clamp(0.0, 1.0))
                 comfy.model_management.throw_exception_if_processing_interrupted()
 
