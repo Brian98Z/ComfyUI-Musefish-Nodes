@@ -1,4 +1,4 @@
-"""PiD video upscaling without Mie Loop.
+"""PiD batch video upscaling node.
 
 The node performs VAE encode -> PiD conditioning -> custom sampling -> VAE decode
 inside one execution. Frames are sampled in bounded batches, while the model is
