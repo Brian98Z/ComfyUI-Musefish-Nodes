@@ -86,8 +86,8 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                 io.Float.Input("frame_rate", default=24.0, min=1.0, max=240.0, step=0.01),
                 io.Model.Input("model"),
                 io.Clip.Input("clip"),
-                io.Vae.Input("vae"),
-                io.String.Input("positive_prompt", default="超高清，细节丰富", multiline=True),
+                io.Vae.Input("encode_vae"),
+                io.String.Input("positive_prompt", default="high quality, ultra detailed, sharp details", multiline=True),
                 io.Int.Input("batch_size", default=2, min=1, max=64, step=1),
                 io.Int.Input("model_long_edge", default=1024, min=256, max=4096, step=16),
                 io.Int.Input("upscale_factor", default=4, min=2, max=8, step=1),
@@ -110,7 +110,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
         frame_rate: float,
         model,
         clip,
-        vae,
+        encode_vae,
         positive_prompt: str,
         batch_size: int,
         model_long_edge: int,
@@ -125,8 +125,10 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
     ) -> io.NodeOutput:
         if images is None:
             raise ValueError("images are required")
-        if model is None or clip is None or vae is None:
-            raise ValueError("model, clip, and vae are required")
+        if model is None or clip is None or encode_vae is None:
+            raise ValueError("model, clip, and encode_vae are required")
+        from nodes import VAELoader
+        decode_vae = VAELoader().load_vae("pixel_space")[0]
 
         source_images = images
         if source_images.ndim != 4 or source_images.shape[-1] < 3:
@@ -144,8 +146,6 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
         target_h = model_h * int(upscale_factor)
         target_w = model_w * int(upscale_factor)
 
-        # Encode all low-resolution conditioning before loading the diffusion
-        # model. Only CPU copies are retained between batches.
         lowres_latents: list[torch.Tensor] = []
         with torch.inference_mode():
             for start in range(0, frame_count, batch_size):
@@ -156,7 +156,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                     "bicubic",
                     "center",
                 ).movedim(1, -1)
-                lowres_latents.append(vae.encode(chunk).detach().cpu())
+                lowres_latents.append(encode_vae.encode(chunk).detach().cpu())
                 comfy.model_management.throw_exception_if_processing_interrupted()
 
         positive = clip.encode_from_tokens_scheduled(clip.tokenize(positive_prompt))
@@ -200,7 +200,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                     disable_pbar=False,
                     seed=int(seed) + batch_index,
                 )
-                decoded = vae.decode(samples).detach().float().cpu()
+                decoded = decode_vae.decode(samples).detach().float().cpu()
                 output_chunks.append(decoded[:, :, :, :3].clamp(0.0, 1.0))
                 comfy.model_management.throw_exception_if_processing_interrupted()
 
