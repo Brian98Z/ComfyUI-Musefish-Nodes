@@ -54,6 +54,7 @@ Musefish PiD Batch Video Upscale
 | `steps` | `4` |
 | `positive_prompt` | `high quality, ultra detailed, sharp details` |
 模型内部始终先将输入帧长边缩放到 `1024`，执行固定的 `1024 → 4096` 超分。`upscale_factor` 只控制最终交付尺寸：设置 `2` 时先得到 4096，再缩小到 2048；设置 `3` 时缩小到 3072；设置 `4` 时直接输出 4096。
+输入帧放大到模型尺寸时使用 `lanczos`；输入帧缩小到模型尺寸时使用 `area`；4x 模型结果缩小到 2x/3x 交付尺寸时使用 `area`。
 
 模型输入尺寸是内置约束，用户无需设置。
 推荐模型：

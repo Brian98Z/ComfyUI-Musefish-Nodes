@@ -147,6 +147,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
         model_target_w = model_w * _MODEL_SCALE
         output_h = model_h * int(upscale_factor)
         output_w = model_w * int(upscale_factor)
+        input_resize_method = "lanczos" if model_w > source_w or model_h > source_h else "area"
 
         lowres_latents: list[torch.Tensor] = []
         with torch.inference_mode():
@@ -155,7 +156,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                     source_images[start : start + batch_size].movedim(-1, 1),
                     model_w,
                     model_h,
-                    "bicubic",
+                    input_resize_method,
                     "center",
                 ).movedim(1, -1)
                 lowres_latents.append(encode_vae.encode(chunk).detach().cpu())
