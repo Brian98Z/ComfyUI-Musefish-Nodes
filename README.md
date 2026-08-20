@@ -1,6 +1,50 @@
 # ComfyUI-Musefish-Nodes
 
-ComfyUI 节点集合，当前提供 PiD 视频批处理超分节点。
+ComfyUI 节点集合，当前提供 PiD 视频批处理超分与频闪抑制节点。
+示例模板工作流：`workflows/Musefish_PiD_Batch_Video_Upscale.json`（UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`）。
+该模板在 PiD 输出后接入 `MusefishAntiflicker`，再进行自适应锐化与视频合并。
+### Musefish Antiflicker
+
+节点 ID：`MusefishAntiflicker`
+
+功能：对 `IMAGE` 帧批次执行前后帧对称、亮度引导的时间双边滤波，抑制局部频闪，同时拒绝运动边缘，避免单向时间递归造成拖影。实现位于 `musefish_nodes.py`，不依赖或修改 `VideoHelperSuite`。
+
+推荐连接：
+
+```text
+VHS_LoadVideo IMAGE ──→ MusefishAntiflicker ──→ VHS_VideoCombine IMAGE
+VHS_LoadVideo AUDIO ─────────────────────────→ VHS_VideoCombine audio
+```
+
+参数：
+
+| 参数 | 默认值 | 说明 |
+| --- | ---: | --- |
+| `luma_tmp` | `15` | 亮度时间相似度宽度；提高可减轻亮度频闪，但过高会降低运动纹理稳定性 |
+| `chroma_tmp` | `20` | 色度时间相似度宽度；用于背景颜色跳变，通常不需要超过 `20` |
+
+推荐起点为 `15/20`。节点使用当前帧与前后相邻源帧，不使用递归滤波历史，因此运动主体不会产生单向拖尾。输出视频建议在 `VHS_VideoCombine` 使用 `yuv420p10le`，减少高光区域的色带和色度伪影。
+
+如果主体出现拖影，优先降低 `luma_tmp`；如果只有背景颜色跳变，保持亮度参数不变、单独提高 `chroma_tmp`。不要把两个参数同时大幅提高。
+
+## 模板工作流结构
+
+当前模板 `Musefish_PiD_Batch_Video_Upscale.json` 的处理顺序：
+
+```text
+LoadVideo
+  ├── IMAGE → Musefish PiD Batch Video Upscale
+  ├── AUDIO ───────────────────────────────┐
+  └── FPS ─────────────────────────────────┤
+                                           ▼
+Musefish PiD Batch Video Upscale → Musefish Antiflicker(15/20)
+                                  → ImageCASharpening+(0.9)
+                                  → VHS_VideoCombine(yuv420p)
+```
+
+PiD 的原始 `VIDEO` 输出不经过后续图像节点；最终交付应使用经过 `IMAGE` 链路处理后的 `VHS_VideoCombine` 输出。
+
+### PiD 颜色校正与频闪抑制
 
 ## 节点
 
@@ -37,6 +81,19 @@ Musefish PiD Batch Video Upscale
                             ├── VIDEO → SaveVideo
                             └── IMAGE → 预览或视频合并节点
 ```
+### 颜色校正与频闪抑制
+
+示例工作流在 PiD 输出后增加 `ColorMatchToReference`，并用 `ImageFromBatch(batch_index=0, length=1)` 固定取输入视频首帧作为参考：
+
+```text
+VHS_LoadVideo ──→ ImageFromBatch(首帧) ──→ ColorMatchToReference.reference_image
+Musefish PiD ───────────────────────────→ ColorMatchToReference.images
+ColorMatchToReference ──────────────────→ VHS_VideoCombine
+```
+
+默认 `match_strength=0.85`、`batch_size=4`。固定首帧参考会把每帧超分结果的 LAB 均值/标准差拉回同一颜色基准，针对 PiD 帧间色偏造成的频闪；它不能修复输入视频本身的亮度或内容闪烁。需要关闭校正时，断开颜色匹配节点并将 PiD 输出直接接入视频合并节点。
+
+颜色匹配后的结果应从 PiD 的 `IMAGE` 输出进入 `VHS_VideoCombine`；PiD 的 `VIDEO` 输出仍是未经过外部颜色节点的原始视频对象。
 
 `encode_vae` 是唯一需要连接的 VAE 输入。解码端固定使用 ComfyUI 的 `pixel_space` VAE，不需要额外的 VAE 节点。
 
@@ -105,10 +162,12 @@ ComfyUI/custom_nodes/ComfyUI-Musefish-Nodes
 
 ```text
 Musefish PiD Batch Video Upscale
+Musefish Antiflicker (symmetric bilateral)
 ```
 
 ## 文件
 
 - `__init__.py`：ComfyUI 扩展入口
-- `musefish_nodes.py`：节点实现
-- `workflows/Musefish_PiD_Batch_Video_Upscale.json`：示例工作流
+- `musefish_nodes.py`：PiD 超分与对称双边频闪抑制节点实现
+- `workflows/Musefish_PiD_Batch_Video_Upscale.json`：包含 PiD → Antiflicker(15/20) → 自适应锐化的模板工作流
+- 模板 UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`

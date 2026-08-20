@@ -68,6 +68,122 @@ def _round_multiple(value: int, multiple: int = 16) -> int:
     return max(multiple, (value // multiple) * multiple)
 
 
+def _rgb_to_yuv601(rgb: torch.Tensor):
+    """RGB [...,3] float 0-1 -> Y/U/V each [...,1], U/V centered at 0.5 (full-range BT.601)."""
+    y = 0.299 * rgb[..., 0:1] + 0.587 * rgb[..., 1:2] + 0.114 * rgb[..., 2:3]
+    u = (rgb[..., 2:3] - y) * 0.492 + 0.5
+    v = (rgb[..., 0:1] - y) * 0.877 + 0.5
+    return y, u, v
+
+
+def _yuv601_to_rgb(y: torch.Tensor, u: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    r = y + (v - 0.5) / 0.877
+    g = y - 0.194 * (u - 0.5) / 0.492 - 0.509 * (v - 0.5) / 0.877
+    b = y + (u - 0.5) / 0.492
+    return torch.cat([r, g, b], dim=-1).clamp(0.0, 1.0)
+
+
+def _temporal_bilateral(
+    seq: torch.Tensor,
+    strength: float,
+    guide: Optional[torch.Tensor] = None,
+    guide_strength: Optional[float] = None,
+) -> torch.Tensor:
+    """Symmetric two-sided temporal bilateral filter.
+
+    Uses only the immediately adjacent *source* frames, never a recursively
+    filtered history. Each neighbor is weighted by its photometric distance to
+    the current frame, so motion boundaries receive near-zero weight instead
+    of leaving a one-directional trail. For chroma planes, the source luma
+    plane is an additional motion guide that blocks color bleeding at edges.
+
+    Args:
+        seq: [N, H, W] float tensor in temporal order.
+        strength: Similarity width on the hqdn3d 0-255 scale; zero disables
+            filtering.
+        guide: Optional [N, H, W] luma guide.
+        guide_strength: Similarity width for the luma guide, 0-255.
+    """
+    if strength <= 0.0 or seq.shape[0] < 2:
+        return seq.clone()
+
+    sigma = max(float(strength) / 255.0, torch.finfo(seq.dtype).eps)
+    guide_sigma = None
+    if guide is not None and guide_strength is not None and guide_strength > 0.0:
+        guide_sigma = max(float(guide_strength) / 255.0, torch.finfo(seq.dtype).eps)
+
+    # Vectorize the two-sided neighborhood. Invalid boundary neighbors are
+    # duplicated only to keep tensor shapes; their weights are explicitly zero.
+    previous = torch.cat((seq[:1], seq[:-1]), dim=0)
+    following = torch.cat((seq[1:], seq[-1:]), dim=0)
+    previous_valid = torch.ones((seq.shape[0], 1, 1), device=seq.device, dtype=seq.dtype)
+    following_valid = previous_valid.clone()
+    previous_valid[0] = 0.0
+    following_valid[-1] = 0.0
+
+
+    prev_weight = torch.exp(-((previous - seq) / sigma).square()) * previous_valid
+    next_weight = torch.exp(-((following - seq) / sigma).square()) * following_valid
+    if guide is not None and guide_sigma is not None:
+        guide_previous = torch.cat((guide[:1], guide[:-1]), dim=0)
+        guide_following = torch.cat((guide[1:], guide[-1:]), dim=0)
+        prev_weight *= torch.exp(-((guide_previous - guide) / guide_sigma).square())
+        next_weight *= torch.exp(-((guide_following - guide) / guide_sigma).square())
+
+    weight_sum = 1.0 + prev_weight + next_weight
+    return (seq + previous * prev_weight + following * next_weight) / weight_sum
+
+
+class MusefishAntiflicker(io.ComfyNode):
+    """Ghost-resistant temporal flicker suppression on an IMAGE frame batch.
+
+    The node uses a symmetric bilateral filter over the immediately adjacent
+    source frames. Unlike the previous one-sided hqdn3d-style recursion, it
+    cannot propagate a previous-frame residual into subsequent frames.
+    """
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="MusefishAntiflicker",
+            display_name="Musefish Antiflicker (symmetric bilateral)",
+            search_aliases=["antiflicker", "flicker removal", "去频闪", "频闪抑制"],
+            category="Musefish/Video",
+            description=(
+                "Symmetric, luma-guided temporal bilateral filtering on an IMAGE "
+                "frame batch. Smooths local flicker while rejecting motion edges to "
+                "avoid one-directional ghost trails."
+            ),
+            inputs=[
+                io.Image.Input("images"),
+                io.Float.Input("luma_tmp", default=15.0, min=0.0, max=255.0, step=0.5),
+                io.Float.Input("chroma_tmp", default=20.0, min=0.0, max=255.0, step=0.5)
+            ],
+            outputs=[io.Image.Output()],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: Input.Image,
+        luma_tmp: float,
+        chroma_tmp: float,
+    ) -> io.NodeOutput:
+        if images is None or images.ndim != 4 or images.shape[-1] < 3:
+            raise ValueError("images must be an RGB frame batch [N,H,W,3]")
+        rgb = images[:, :, :, :3].float()
+        y, u, v = _rgb_to_yuv601(rgb)
+        y_plane = y.squeeze(-1)
+        yf = _temporal_bilateral(y_plane, float(luma_tmp)).unsqueeze(-1)
+        uf = _temporal_bilateral(
+            u.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
+        ).unsqueeze(-1)
+        vf = _temporal_bilateral(
+            v.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
+        ).unsqueeze(-1)
+        return io.NodeOutput(_yuv601_to_rgb(yf, uf, vf))
+
+
 class MusefishPiDBatchVideoUpscale(io.ComfyNode):
     """Batch PiD upscaler with one model lifecycle per node execution."""
 
@@ -227,7 +343,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
 class MusefishExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [MusefishPiDBatchVideoUpscale]
+        return [MusefishPiDBatchVideoUpscale, MusefishAntiflicker]
 
 
 async def comfy_entrypoint() -> MusefishExtension:

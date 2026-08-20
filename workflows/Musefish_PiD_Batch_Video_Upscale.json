@@ -1,161 +1,72 @@
 {
   "id": "d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2",
   "revision": 0,
-  "last_node_id": 8,
-  "last_link_id": 11,
+  "last_node_id": 23,
+  "last_link_id": 39,
   "nodes": [
-    {
-      "id": 1,
-      "type": "VHS_LoadVideo",
-      "pos": [
-        0,
-        80
-      ],
-      "size": [
-        336,
-        875
-      ],
-      "flags": {},
-      "order": 0,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "IMAGE",
-          "type": "IMAGE",
-          "links": [
-            1
-          ]
-        },
-        {
-          "name": "frame_count",
-          "type": "INT",
-          "links": null
-        },
-        {
-          "name": "audio",
-          "type": "AUDIO",
-          "links": [
-            2,
-            11
-          ]
-        },
-        {
-          "name": "video_info",
-          "type": "VHS_VIDEOINFO",
-          "links": [
-            3
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VHS_LoadVideo"
-      },
-      "widgets_values": {
-        "video": "文生视频.mp4",
-        "force_rate": 0,
-        "custom_width": 0,
-        "custom_height": 0,
-        "frame_load_cap": 4,
-        "skip_first_frames": 0,
-        "select_every_nth": 1,
-        "format": "None"
-      }
-    },
-    {
-      "id": 2,
-      "type": "VHS_VideoInfoSource",
-      "pos": [
-        390,
-        650
-      ],
-      "size": [
-        172,
-        106
-      ],
-      "flags": {},
-      "order": 1,
-      "mode": 0,
-      "inputs": [
-        {
-          "name": "video_info",
-          "type": "VHS_VIDEOINFO",
-          "link": 3
-        }
-      ],
-      "outputs": [
-        {
-          "name": "fps",
-          "type": "FLOAT",
-          "links": [
-            4,
-            6
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "VHS_VideoInfoSource"
-      },
-      "widgets_values": {}
-    },
-    {
-      "id": 3,
-      "type": "UNETLoader",
-      "pos": [
-        420,
-        0
-      ],
-      "size": [
-        490,
-        104
-      ],
-      "flags": {},
-      "order": 2,
-      "mode": 0,
-      "inputs": [],
-      "outputs": [
-        {
-          "name": "MODEL",
-          "type": "MODEL",
-          "links": [
-            7
-          ]
-        }
-      ],
-      "properties": {
-        "Node name for S&R": "UNETLoader"
-      },
-      "widgets_values": [
-        "PiD\\pid_1.5_flux1_1024_to_4096_4step_int8_convrot.safetensors",
-        "default"
-      ]
-    },
     {
       "id": 4,
       "type": "CLIPLoader",
       "pos": [
-        420,
-        150
+        423.079939550618,
+        277.1906813156219
       ],
       "size": [
         490,
         121
       ],
       "flags": {},
-      "order": 3,
+      "order": 0,
       "mode": 0,
-      "inputs": [],
+      "inputs": [
+        {
+          "localized_name": "CLIP名称",
+          "name": "clip_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "clip_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "类型",
+          "name": "type",
+          "type": "COMBO",
+          "widget": {
+            "name": "type"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "设备",
+          "name": "device",
+          "shape": 7,
+          "type": "COMBO",
+          "widget": {
+            "name": "device"
+          },
+          "link": null
+        }
+      ],
       "outputs": [
         {
+          "localized_name": "CLIP",
           "name": "CLIP",
           "type": "CLIP",
           "links": [
-            8
+            14
           ]
         }
       ],
       "properties": {
-        "Node name for S&R": "CLIPLoader"
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "CLIPLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
       },
       "widgets_values": [
         "PixelDiT\\gemma_2_2b_it_elm_fp8_scaled.safetensors",
@@ -167,149 +78,902 @@
       "id": 5,
       "type": "VAELoader",
       "pos": [
-        420,
-        330
+        423.079939550618,
+        455.32638410255237
       ],
       "size": [
         300,
         80
       ],
       "flags": {},
-      "order": 4,
+      "order": 1,
       "mode": 0,
-      "inputs": [],
+      "inputs": [
+        {
+          "localized_name": "vae名称",
+          "name": "vae_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "vae_name"
+          },
+          "link": null
+        }
+      ],
       "outputs": [
         {
+          "localized_name": "VAE",
           "name": "VAE",
           "type": "VAE",
           "links": [
-            9
+            15
           ]
         }
       ],
       "properties": {
-        "Node name for S&R": "VAELoader"
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "VAELoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
       },
       "widgets_values": [
         "Flux\\UltraFlux-v1-vae.safetensors"
       ]
     },
     {
-      "id": 7,
-      "type": "MusefishPiDBatchVideoUpscale",
+      "id": 3,
+      "type": "UNETLoader",
       "pos": [
-        1100,
-        80
+        423.079939550618,
+        116.05497852869132
       ],
       "size": [
-        330,
-        700
+        490,
+        104
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "UNet名称",
+          "name": "unet_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "unet_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "数据类型",
+          "name": "weight_dtype",
+          "type": "COMBO",
+          "widget": {
+            "name": "weight_dtype"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "模型",
+          "name": "MODEL",
+          "type": "MODEL",
+          "links": [
+            13
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "UNETLoader",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
+      },
+      "widgets_values": [
+        "PiD\\pid_1.5_flux1_1024_to_4096_4step_int8_convrot.safetensors",
+        "default"
+      ]
+    },
+    {
+      "id": 19,
+      "type": "GetVideoComponents",
+      "pos": [
+        423.079939550618,
+        592.4620868894829
+      ],
+      "size": [
+        227.38889887645132,
+        97.03860129882946
       ],
       "flags": {},
       "order": 6,
       "mode": 0,
       "inputs": [
         {
-          "name": "images",
-          "type": "IMAGE",
-          "link": 1
-        },
-        {
-          "name": "audio",
-          "type": "AUDIO",
-          "link": 2
-        },
-        {
-          "name": "frame_rate",
-          "type": "FLOAT",
-          "link": 4
-        },
-        {
-          "name": "model",
-          "type": "MODEL",
-          "link": 7
-        },
-        {
-          "name": "clip",
-          "type": "CLIP",
-          "link": 8
-        },
-        {
-          "name": "encode_vae",
-          "type": "VAE",
-          "link": 9
+          "localized_name": "视频",
+          "name": "video",
+          "type": "VIDEO",
+          "link": 37
         }
       ],
       "outputs": [
         {
-          "name": "VIDEO",
-          "type": "VIDEO",
-          "links": null
-        },
-        {
-          "name": "IMAGE",
+          "localized_name": "图像",
+          "name": "images",
           "type": "IMAGE",
           "links": [
-            5
+            32
+          ]
+        },
+        {
+          "localized_name": "音频",
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            33,
+            34
+          ]
+        },
+        {
+          "localized_name": "帧率",
+          "name": "fps",
+          "type": "FLOAT",
+          "links": [
+            31,
+            35
+          ]
+        },
+        {
+          "localized_name": "bit_depth",
+          "name": "bit_depth",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "GetVideoComponents",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": []
+    },
+    {
+      "id": 20,
+      "type": "Video Slice",
+      "pos": [
+        423.079939550618,
+        746.6363909752429
+      ],
+      "size": [
+        270,
+        106
+      ],
+      "flags": {},
+      "order": 5,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "视频",
+          "name": "video",
+          "type": "VIDEO",
+          "link": 36
+        },
+        {
+          "localized_name": "起始时间",
+          "name": "start_time",
+          "type": "FLOAT",
+          "widget": {
+            "name": "start_time"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "时长",
+          "name": "duration",
+          "type": "FLOAT",
+          "widget": {
+            "name": "duration"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "严格时长",
+          "name": "strict_duration",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "strict_duration"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "视频",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            37
           ]
         }
       ],
       "properties": {
-        "Node name for S&R": "MusefishPiDBatchVideoUpscale"
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "Video Slice",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
       },
       "widgets_values": [
-        "high quality, ultra detailed, sharp details",
+        0,
         1,
-        4,
-        "flux",
-        0.0,
-        1.0,
-        "lcm",
-        "simple",
-        4,
-        0
+        true
       ]
     },
     {
-      "id": 8,
-      "type": "VHS_VideoCombine",
+      "id": 9,
+      "type": "MusefishPiDBatchVideoUpscale",
       "pos": [
-        1530,
-        100
+        1030.3057244955128,
+        116.05497852869132
       ],
       "size": [
-        442,
-        1082
+        400,
+        456
       ],
       "flags": {},
       "order": 7,
       "mode": 0,
       "inputs": [
         {
+          "localized_name": "images",
           "name": "images",
           "type": "IMAGE",
-          "link": 5
+          "link": 32
         },
         {
+          "localized_name": "model",
+          "name": "model",
+          "type": "MODEL",
+          "link": 13
+        },
+        {
+          "localized_name": "clip",
+          "name": "clip",
+          "type": "CLIP",
+          "link": 14
+        },
+        {
+          "localized_name": "encode_vae",
+          "name": "encode_vae",
+          "type": "VAE",
+          "link": 15
+        },
+        {
+          "localized_name": "audio",
           "name": "audio",
+          "shape": 7,
           "type": "AUDIO",
-          "link": 11
+          "link": 34
         },
         {
+          "localized_name": "frame_rate",
           "name": "frame_rate",
           "type": "FLOAT",
-          "link": 6
+          "widget": {
+            "name": "frame_rate"
+          },
+          "link": 35
+        },
+        {
+          "localized_name": "positive_prompt",
+          "name": "positive_prompt",
+          "type": "STRING",
+          "widget": {
+            "name": "positive_prompt"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "batch_size",
+          "name": "batch_size",
+          "type": "INT",
+          "widget": {
+            "name": "batch_size"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "upscale_factor",
+          "name": "upscale_factor",
+          "type": "INT",
+          "widget": {
+            "name": "upscale_factor"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "latent_format",
+          "name": "latent_format",
+          "type": "COMBO",
+          "widget": {
+            "name": "latent_format"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "degrade_sigma",
+          "name": "degrade_sigma",
+          "type": "FLOAT",
+          "widget": {
+            "name": "degrade_sigma"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "cfg",
+          "name": "cfg",
+          "type": "FLOAT",
+          "widget": {
+            "name": "cfg"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "sampler_name",
+          "name": "sampler_name",
+          "type": "COMBO",
+          "widget": {
+            "name": "sampler_name"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "scheduler",
+          "name": "scheduler",
+          "type": "COMBO",
+          "widget": {
+            "name": "scheduler"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "steps",
+          "name": "steps",
+          "type": "INT",
+          "widget": {
+            "name": "steps"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          },
+          "link": null
         }
       ],
       "outputs": [
         {
+          "localized_name": "视频",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            23
+          ]
+        },
+        {
+          "localized_name": "图像",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            38
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
+        "ver": "7b84a7576935943546f36e2c77294c254ebbd326",
+        "Node name for S&R": "MusefishPiDBatchVideoUpscale",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        24,
+        "high quality, ultra detailed, sharp details",
+        2,
+        4,
+        "flux",
+        0,
+        1,
+        "lcm",
+        "simple",
+        4,
+        0,
+        "fixed"
+      ]
+    },
+    {
+      "id": 13,
+      "type": "MusefishAntiflicker",
+      "pos": [
+        1489.954358772637,
+        304.11469013272006
+      ],
+      "size": [
+        358.0446533203125,
+        82
+      ],
+      "flags": {},
+      "order": 9,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 39
+        },
+        {
+          "localized_name": "luma_tmp",
+          "name": "luma_tmp",
+          "type": "FLOAT",
+          "widget": {
+            "name": "luma_tmp"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "chroma_tmp",
+          "name": "chroma_tmp",
+          "type": "FLOAT",
+          "widget": {
+            "name": "chroma_tmp"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "图像",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            21
+          ]
+        }
+      ],
+      "properties": {
+        "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
+        "ver": "a5d1f13f07fff0e93793f8cd3fb4af635e00d496",
+        "Node name for S&R": "MusefishAntiflicker",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        15,
+        20
+      ]
+    },
+    {
+      "id": 14,
+      "type": "ImageCASharpening+",
+      "pos": [
+        1489.954358772637,
+        522.6220219354707
+      ],
+      "size": [
+        358.9913964444902,
+        61.16034330995569
+      ],
+      "flags": {},
+      "order": 10,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "图像",
+          "localized_name": "image",
+          "name": "image",
+          "type": "IMAGE",
+          "link": 21
+        },
+        {
+          "localized_name": "数量",
+          "name": "amount",
+          "type": "FLOAT",
+          "widget": {
+            "name": "amount"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "图像",
+          "localized_name": "图像",
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            22
+          ]
+        }
+      ],
+      "title": "图像对比度自适应锐化",
+      "properties": {
+        "cnr_id": "comfyui_essentials",
+        "ver": "1.1.0",
+        "Node name for S&R": "ImageCASharpening+",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        0.9
+      ]
+    },
+    {
+      "id": 23,
+      "type": "easy clearCacheAll",
+      "pos": [
+        1488.3966081082754,
+        116.05497852869132
+      ],
+      "size": [
+        361.7699834877071,
+        51.552379801278164
+      ],
+      "flags": {
+        "collapsed": false
+      },
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "输入任何",
+          "localized_name": "输入任何",
+          "name": "anything",
+          "type": "*",
+          "link": 38
+        }
+      ],
+      "outputs": [
+        {
+          "label": "输出",
+          "localized_name": "output",
+          "name": "output",
+          "type": "*",
+          "links": [
+            39
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfyui-easy-use",
+        "ver": "8ba21d0b442002e66389d6e87faf828bfe05b2ad",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {}
+        },
+        "Node name for S&R": "easy clearCacheAll"
+      }
+    },
+    {
+      "id": 15,
+      "type": "SaveVideo",
+      "pos": [
+        821.8410322277522,
+        948.4846847441612
+      ],
+      "size": [
+        545.3981827337957,
+        1041.6659123613758
+      ],
+      "flags": {},
+      "order": 8,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "视频",
+          "name": "video",
+          "type": "VIDEO",
+          "link": 23
+        },
+        {
+          "localized_name": "文件名前缀",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "格式",
+          "name": "format",
+          "type": "COMBO",
+          "widget": {
+            "name": "format"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "编码器",
+          "name": "codec",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "widget": {
+            "name": "codec"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "video",
+          "name": "video",
+          "type": "VIDEO",
+          "links": null
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "SaveVideo",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "test",
+        "auto",
+        "auto"
+      ]
+    },
+    {
+      "id": 18,
+      "type": "LoadVideo",
+      "pos": [
+        246.7293725202957,
+        973.0265455132898
+      ],
+      "size": [
+        549.9219412823924,
+        1017.5182283841103
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "localized_name": "文件",
+          "name": "file",
+          "type": "COMBO",
+          "widget": {
+            "name": "file"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "选择要上传的文件",
+          "name": "upload",
+          "type": "IMAGEUPLOAD",
+          "widget": {
+            "name": "upload"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "localized_name": "视频",
+          "name": "VIDEO",
+          "type": "VIDEO",
+          "links": [
+            36
+          ]
+        }
+      ],
+      "properties": {
+        "cnr_id": "comfy-core",
+        "ver": "0.33.1",
+        "Node name for S&R": "LoadVideo",
+        "ue_properties": {
+          "widget_ue_connectable": {},
+          "input_ue_unconnectable": {},
+          "version": "7.8"
+        }
+      },
+      "widgets_values": [
+        "文生视频.mp4",
+        "image"
+      ]
+    },
+    {
+      "id": 8,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        1400.894239780496,
+        718.1996450117961
+      ],
+      "size": [
+        540.9063830228788,
+        1276.8432665800683
+      ],
+      "flags": {},
+      "order": 11,
+      "mode": 0,
+      "inputs": [
+        {
+          "label": "图像",
+          "localized_name": "images",
+          "name": "images",
+          "type": "IMAGE",
+          "link": 22
+        },
+        {
+          "label": "音频",
+          "localized_name": "audio",
+          "name": "audio",
+          "shape": 7,
+          "type": "AUDIO",
+          "link": 33
+        },
+        {
+          "label": "批次管理",
+          "localized_name": "meta_batch",
+          "name": "meta_batch",
+          "shape": 7,
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "localized_name": "vae",
+          "name": "vae",
+          "shape": 7,
+          "type": "VAE",
+          "link": null
+        },
+        {
+          "localized_name": "帧率",
+          "name": "frame_rate",
+          "type": "FLOAT",
+          "widget": {
+            "name": "frame_rate"
+          },
+          "link": 31
+        },
+        {
+          "localized_name": "循环次数",
+          "name": "loop_count",
+          "type": "INT",
+          "widget": {
+            "name": "loop_count"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "文件名前缀",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "格式",
+          "name": "format",
+          "type": "COMBO",
+          "widget": {
+            "name": "format"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "Ping-Pong",
+          "name": "pingpong",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "pingpong"
+          },
+          "link": null
+        },
+        {
+          "localized_name": "保存到输出文件夹",
+          "name": "save_output",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_output"
+          },
+          "link": null
+        },
+        {
+          "name": "pix_fmt",
+          "type": [
+            "yuv420p",
+            "yuv420p10le"
+          ],
+          "widget": {
+            "name": "pix_fmt"
+          },
+          "link": null
+        },
+        {
+          "name": "crf",
+          "type": "INT",
+          "widget": {
+            "name": "crf"
+          },
+          "link": null
+        },
+        {
+          "label": "保存元数据",
+          "localized_name": "保存元数据",
+          "name": "save_metadata",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "save_metadata"
+          },
+          "link": null
+        },
+        {
+          "label": "修剪音频",
+          "localized_name": "修剪音频",
+          "name": "trim_to_audio",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "trim_to_audio"
+          },
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "label": "文件名",
+          "localized_name": "Filenames",
           "name": "Filenames",
           "type": "VHS_FILENAMES",
           "links": null
         }
       ],
       "properties": {
-        "Node name for S&R": "VHS_VideoCombine"
+        "cnr_id": "comfyui-videohelpersuite",
+        "ver": "1.7.9",
+        "Node name for S&R": "VHS_VideoCombine",
+        "ue_properties": {
+          "widget_ue_connectable": {
+            "frame_rate": true
+          },
+          "version": "7.8",
+          "input_ue_unconnectable": {}
+        }
       },
       "widgets_values": {
         "frame_rate": 24,
@@ -318,106 +982,170 @@
         "format": "video/h264-mp4",
         "pix_fmt": "yuv420p",
         "crf": 19,
-        "save_metadata": true,
+        "save_metadata": false,
         "trim_to_audio": false,
         "pingpong": false,
-        "save_output": true
+        "save_output": true,
+        "videopreview": {
+          "hidden": false,
+          "paused": false,
+          "params": {
+            "filename": "PiD_4x_00001-audio.mp4",
+            "subfolder": "Musefish",
+            "type": "temp",
+            "format": "video/h264-mp4",
+            "frame_rate": 24,
+            "workflow": "PiD_4x_00001.png",
+            "fullpath": "H:\\ComfyUI_Mie_2026_V8.0\\ComfyUI\\temp\\Musefish\\PiD_4x_00001-audio.mp4"
+          }
+        }
       }
     }
   ],
   "links": [
     [
-      1,
-      1,
-      0,
-      7,
-      0,
-      "IMAGE"
-    ],
-    [
-      2,
-      1,
-      2,
-      7,
-      1,
-      "AUDIO"
-    ],
-    [
-      3,
-      1,
-      3,
-      2,
-      0,
-      "VHS_VIDEOINFO"
-    ],
-    [
-      4,
-      2,
-      0,
-      7,
-      2,
-      "FLOAT"
-    ],
-    [
-      5,
-      7,
-      1,
-      8,
-      0,
-      "IMAGE"
-    ],
-    [
-      6,
-      2,
-      0,
-      8,
-      2,
-      "FLOAT"
-    ],
-    [
-      7,
+      13,
       3,
       0,
-      7,
-      3,
+      9,
+      1,
       "MODEL"
     ],
     [
-      8,
+      14,
       4,
       0,
-      7,
-      4,
+      9,
+      2,
       "CLIP"
     ],
     [
-      9,
+      15,
       5,
       0,
-      7,
-      5,
+      9,
+      3,
       "VAE"
     ],
     [
-      11,
-      1,
+      21,
+      13,
+      0,
+      14,
+      0,
+      "IMAGE"
+    ],
+    [
+      22,
+      14,
+      0,
+      8,
+      0,
+      "IMAGE"
+    ],
+    [
+      23,
+      9,
+      0,
+      15,
+      0,
+      "VIDEO"
+    ],
+    [
+      31,
+      19,
       2,
+      8,
+      4,
+      "FLOAT"
+    ],
+    [
+      32,
+      19,
+      0,
+      9,
+      0,
+      "IMAGE"
+    ],
+    [
+      33,
+      19,
+      1,
       8,
       1,
       "AUDIO"
+    ],
+    [
+      34,
+      19,
+      1,
+      9,
+      4,
+      "AUDIO"
+    ],
+    [
+      35,
+      19,
+      2,
+      9,
+      5,
+      "FLOAT"
+    ],
+    [
+      36,
+      18,
+      0,
+      20,
+      0,
+      "VIDEO"
+    ],
+    [
+      37,
+      20,
+      0,
+      19,
+      0,
+      "VIDEO"
+    ],
+    [
+      38,
+      9,
+      1,
+      23,
+      0,
+      "IMAGE"
+    ],
+    [
+      39,
+      23,
+      0,
+      13,
+      0,
+      "IMAGE"
     ]
   ],
   "groups": [],
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.75,
+      "scale": 0.7247295000000026,
       "offset": [
-        0,
-        0
+        768.7945185441674,
+        -493.025075177168
       ]
     },
-    "ue_links": []
+    "ue_links": [],
+    "anomalous_hashes": {
+      "5_Flux\\UltraFlux-v1-vae.safetensors": {
+        "hash": "",
+        "size": 335306212
+      },
+      "3_PiD\\pid_1.5_flux1_1024_to_4096_4step_int8_convrot.safetensors": {
+        "hash": "",
+        "size": 1584813952
+      }
+    },
+    "links_added_by_ue": []
   },
   "version": 0.4
 }
