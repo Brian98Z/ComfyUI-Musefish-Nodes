@@ -1,10 +1,14 @@
 # ComfyUI-Musefish-Nodes
 
-ComfyUI 节点集合：PiD 视频批处理超分 + 自动分批的频闪抑制与频率分离锐化后处理。
+**视频超分 + 后处理一站式节点包**：Musefish PiD 视频超分、自动分批去频闪、频率分离锐化。专为 4K 长视频设计——后处理节点按显存**自动分批**，33 帧 4K 单段直跑不爆显存，支持 GPU / CPU 自动切换。
 
-- `AutoBatchAntiflicker`：时间双边滤波去频闪，自动分批 + CPU 卸载
-- `AutoBatchImageSharpenFS`：频率分离锐化（hard/linear light），自动分批 + CPU 卸载
-- `MusefishPiDBatchVideoUpscale`：PiD 视频超分
+## 主要功能
+
+- **`Musefish PiD Batch Video Upscale`**：PiD 视频 4x 超分（固定 1024 → 4096 路径），批次间复用同一噪声模板保证帧间稳定
+- **`AutoBatch Antiflicker`**：对称时间双边滤波去频闪，运动边缘不拖影；`frames_per_batch=0` 自动分批 + `device=auto` CPU 卸载
+- **`AutoBatch Image Sharpen FS`**：频率分离锐化（hard/linear light），针对 4K 超分软边；同样自动分批 + CPU 卸载
+
+**快速上手**：PiD 超分输出 → `AutoBatch Antiflicker` → `AutoBatch Image Sharpen FS` → `VHS_VideoCombine`，参数全默认即可。
 
 示例模板工作流：`workflows/Musefish_PiD_Batch_Video_Upscale.json`（UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`）。
 该模板在 PiD 输出后接入 `AutoBatchAntiflicker`，再进行自适应锐化与视频合并。
@@ -83,7 +87,7 @@ output    = hard/linear light 混合(images, high_pass)
 | 原视频 | [案例-原视频.mp4](assets/案例-原视频.mp4) |
 | 4 倍超分 + 后处理 | [案例-4倍超分.mp4](assets/案例-4倍超分.mp4) |
 
-![工作流界面截图](assets/工作流截图.png)
+![效果对比图](assets/效果对比图.png)
 
 > 说明：超分视频为 4K 竖屏（2304×4096），文件较大，下载后建议本地播放器或剪辑软件查看；对比细节可重点看发丝、衣物纹理与主体边缘线条的锐度。
 
