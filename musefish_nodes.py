@@ -134,47 +134,42 @@ def _temporal_bilateral(
     return (seq + previous * prev_weight + following * next_weight) / weight_sum
 
 
-# Antiflicker processes frames on the GPU in bounded chunks so a long video
-# never materializes the whole sequence (plus its neighbor/weight copies) in
-# either VRAM or system RAM.
-_ANTIFLICKER_CHUNK = 8
+# Antiflicker processes frames in bounded chunks sized to the free memory of
+# the selected device (VRAM for gpu, system RAM for cpu) so a long video never
+# materializes the whole sequence (plus its neighbor/weight copies) at once.
+# Interior chunk frames see their true temporal neighbors because every chunk
+# carries one extra frame per side.
+_ANTIFLICKER_PEAK_COPIES = 8.0  # rgb + y/u/v + yf/uf/vf + prev/following/result
+_ANTIFLICKER_MAX_BLOCK = 16
+_ANTIFLICKER_CPU_MAX_BLOCK = 64
 
 
-def _temporal_bilateral_chunked(
-    seq: torch.Tensor,
-    strength: float,
-    guide: Optional[torch.Tensor] = None,
-    guide_strength: Optional[float] = None,
-    chunk: int = _ANTIFLICKER_CHUNK,
-) -> torch.Tensor:
-    """Chunked variant of ``_temporal_bilateral``.
-
-    Each chunk carries one extra source frame on both sides so the interior
-    frames still see their true neighbors. Boundary chunks clamp to the
-    sequence edges, matching the full-sequence result exactly.
-    """
-    n = seq.shape[0]
-    if strength <= 0.0 or n < 2:
-        return seq.clone()
-    if n <= chunk + 2:
-        return _temporal_bilateral(seq, strength, guide, guide_strength)
-
-    out = torch.empty_like(seq)
-    for start in range(0, n, chunk):
-        end = min(n, start + chunk)
-        lo = max(0, start - 1)
-        hi = min(n, end + 1)
-        part = _temporal_bilateral(
-            seq[lo:hi],
-            strength,
-            guide[lo:hi] if guide is not None else None,
-            guide_strength,
-        )
-        out[start:end] = part[start - lo : end - lo]
-    return out
+def _antiflicker_gpu_block(source: torch.Tensor) -> int:
+    """Frame block fitting the currently free VRAM; 0 when even 1 frame does
+    not fit (caller falls back to CPU in auto mode)."""
+    n = source.shape[0]
+    per_frame = source.shape[1] * source.shape[2] * 3 * 4  # float32 NHWC bytes
+    free = comfy.model_management.get_free_memory()
+    if free <= 0:
+        return min(_ANTIFLICKER_MAX_BLOCK, n)
+    block = int(free / (per_frame * _ANTIFLICKER_PEAK_COPIES))
+    return min(_ANTIFLICKER_MAX_BLOCK, block, n)  # may be 0
 
 
-class MusefishAntiflicker(io.ComfyNode):
+def _antiflicker_cpu_block(source: torch.Tensor) -> int:
+    """Frame block fitting the currently free system RAM (float32 copies)."""
+    import psutil
+
+    n = source.shape[0]
+    per_frame = source.shape[1] * source.shape[2] * 3 * 4
+    free = psutil.virtual_memory().available
+    if free <= 0:
+        return min(_ANTIFLICKER_CPU_MAX_BLOCK, n)
+    block = int(free / (per_frame * _ANTIFLICKER_PEAK_COPIES))
+    return max(1, min(_ANTIFLICKER_CPU_MAX_BLOCK, block, n))
+
+
+class AutoBatchAntiflicker(io.ComfyNode):
     """Ghost-resistant temporal flicker suppression on an IMAGE frame batch.
 
     The node uses a symmetric bilateral filter over the immediately adjacent
@@ -185,19 +180,23 @@ class MusefishAntiflicker(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="MusefishAntiflicker",
-            display_name="Musefish Antiflicker (symmetric bilateral)",
-            search_aliases=["antiflicker", "flicker removal", "去频闪", "频闪抑制"],
+            node_id="AutoBatchAntiflicker",
+            display_name="AutoBatch Antiflicker",
+            search_aliases=["antiflicker", "flicker removal", "去频闪", "频闪抑制", "symmetric bilateral", "musefish antiflicker"],
             category="Musefish/Video",
             description=(
                 "Symmetric, luma-guided temporal bilateral filtering on an IMAGE "
                 "frame batch. Smooths local flicker while rejecting motion edges to "
-                "avoid one-directional ghost trails."
+                "avoid one-directional ghost trails. Processing is auto-batched to "
+                "fit the selected device's memory; 'auto' falls back to CPU when "
+                "the GPU cannot even fit one frame."
             ),
             inputs=[
                 io.Image.Input("images"),
                 io.Float.Input("luma_tmp", default=15.0, min=0.0, max=255.0, step=0.5),
-                io.Float.Input("chroma_tmp", default=20.0, min=0.0, max=255.0, step=0.5)
+                io.Float.Input("chroma_tmp", default=20.0, min=0.0, max=255.0, step=0.5),
+                io.Int.Input("frames_per_batch", default=0, min=0, max=128, step=1),
+                io.Combo.Input("device", options=["auto", "gpu", "cpu"], default="auto"),
             ],
             outputs=[io.Image.Output()],
         )
@@ -208,26 +207,61 @@ class MusefishAntiflicker(io.ComfyNode):
         images: Input.Image,
         luma_tmp: float,
         chroma_tmp: float,
+        frames_per_batch: int = 0,
+        device: str = "auto",
     ) -> io.NodeOutput:
         if images is None or images.ndim != 4 or images.shape[-1] < 3:
             raise ValueError("images must be an RGB frame batch [N,H,W,3]")
-        device = comfy.model_management.get_torch_device()
-        # The upstream PiD node delivers the decoded batch on the CPU. Run the
-        # whole bilateral pass on the GPU in bounded chunks so a long video
-        # does not blow up system RAM, then move the result back to the
-        # input's device so downstream behavior is unchanged.
-        rgb = images[:, :, :, :3].float().to(device)
-        y, u, v = _rgb_to_yuv601(rgb)
-        y_plane = y.squeeze(-1)
-        yf = _temporal_bilateral_chunked(y_plane, float(luma_tmp)).unsqueeze(-1)
-        uf = _temporal_bilateral_chunked(
-            u.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
-        ).unsqueeze(-1)
-        vf = _temporal_bilateral_chunked(
-            v.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
-        ).unsqueeze(-1)
-        result = _yuv601_to_rgb(yf, uf, vf)
-        return io.NodeOutput(result.to(images.device))
+        source = images[:, :, :, :3].float().cpu()
+        n = source.shape[0]
+        if n == 0:
+            raise ValueError("IMAGE batch contains no frames")
+        out_device = images.device
+        if n < 2 or (float(luma_tmp) <= 0.0 and float(chroma_tmp) <= 0.0):
+            # Nothing to filter: identity pass, no device round trip.
+            return io.NodeOutput(source.to(out_device))
+
+        fixed = int(frames_per_batch)
+        if device == "cpu":
+            work = torch.device("cpu")
+            block = fixed if fixed > 0 else _antiflicker_cpu_block(source)
+        else:
+            gpu_block = fixed if fixed > 0 else _antiflicker_gpu_block(source)
+            if gpu_block >= 1:
+                work = comfy.model_management.get_torch_device()
+                block = gpu_block
+            elif device == "auto":
+                work = torch.device("cpu")
+                block = fixed if fixed > 0 else _antiflicker_cpu_block(source)
+            else:  # explicit "gpu": force at least one frame per chunk
+                work = comfy.model_management.get_torch_device()
+                block = 1
+
+        result = torch.empty_like(source)  # CPU, never materialized on device whole
+
+        for start in range(0, n, block):
+            # One extra source frame on both sides so interior frames of the
+            # chunk still see their true temporal neighbors. The two boundary
+            # frames of each chunk are computed but discarded below.
+            lo = max(0, start - 1)
+            hi = min(n, start + block + 1)
+            rgb = source[lo:hi].to(work)
+            y, u, v = _rgb_to_yuv601(rgb)
+            y_plane = y.squeeze(-1)
+            yf = _temporal_bilateral(y_plane, float(luma_tmp)).unsqueeze(-1)
+            uf = _temporal_bilateral(
+                u.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
+            ).unsqueeze(-1)
+            vf = _temporal_bilateral(
+                v.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
+            ).unsqueeze(-1)
+            rgb_f = _yuv601_to_rgb(yf, uf, vf)
+            keep_lo = start - lo
+            result[start : start + block] = rgb_f[keep_lo : keep_lo + block].cpu()
+            del rgb, y, u, v, y_plane, yf, uf, vf, rgb_f
+            comfy.model_management.throw_exception_if_processing_interrupted()
+
+        return io.NodeOutput(result.to(out_device))
 
 
 class MusefishPiDBatchVideoUpscale(io.ComfyNode):
@@ -386,10 +420,167 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
         return io.NodeOutput(output_video, output_images)
 
 
+# ---------------------------------------------------------------------------
+# AutoBatch Image Sharpen FS — frequency-separation sharpening with bounded
+# GPU batches. Mirrors RES4LYF "Image Sharpen FS" behavior (hard/linear light)
+# but sizes the float64 CUDA math to the free VRAM so long 4K sequences no
+# longer OOM. The low-pass blur runs on CPU and never touches VRAM.
+# ---------------------------------------------------------------------------
+
+
+def _fs_color_burn_blend(base, blend):
+    return torch.clamp(1 - (1 - base) / (blend + 1e-8), 0, 1)
+
+
+def _fs_divide_blend(base, blend):
+    return torch.clamp(base / (blend + 1e-8), 0, 1)
+
+
+def _fs_hard_light_freq_sep(original, low_pass):
+    high_pass = (_fs_color_burn_blend(original, 1 - low_pass) + _fs_divide_blend(original, low_pass)) / 2
+    return high_pass
+
+
+def _fs_hard_light_blend(base, blend):
+    return torch.where(blend <= 0.5, 2 * base * blend, 1 - 2 * (1 - base) * (1 - blend))
+
+
+def _fs_linear_light_freq_sep(base, blend):
+    return (base + (1 - blend)) / 2
+
+
+def _fs_linear_light_blend(base, blend):
+    return torch.where(blend <= 0.5, base + 2 * blend - 1, base + 2 * (blend - 0.5))
+
+
+def _fs_low_pass_cpu(chunk: torch.Tensor, blur_type: str, intensity: int) -> torch.Tensor:
+    import cv2
+    import numpy as np
+
+    ksize = max(3, int(intensity) - 1)
+    if ksize % 2 == 0:
+        ksize += 1
+    arr = (chunk.detach().cpu().numpy() * 255.0).clip(0, 255).astype(np.uint8)
+    out = np.empty_like(arr)
+    if blur_type == "median":
+        for i in range(arr.shape[0]):
+            out[i] = cv2.medianBlur(arr[i], ksize)
+    else:
+        for i in range(arr.shape[0]):
+            out[i] = cv2.GaussianBlur(arr[i], (ksize, ksize), 0)
+    return torch.from_numpy(out).to(torch.float32) / 255.0
+
+
+_FS_PEAK_COPIES = 6.0  # float64 freq-sep temps: original + low_pass + high_pass + blends
+_FS_GPU_MAX_BATCH = 64
+_FS_CPU_MAX_BATCH = 32
+
+
+def _fs_gpu_batch(n_frames: int, frame_bytes64: float, max_frames: int) -> int:
+    """GPU batch fitting the free VRAM; 0 when even 1 frame does not fit."""
+    if n_frames == 0:
+        return 0
+    free = comfy.model_management.get_free_memory()
+    if free <= 0:
+        return max(1, min(max_frames, n_frames))
+    block = int(free / (frame_bytes64 * _FS_PEAK_COPIES))
+    return min(max_frames, block, n_frames)  # may be 0
+
+
+def _fs_cpu_batch(n_frames: int, frame_bytes64: float, max_frames: int) -> int:
+    """Batch fitting the free system RAM (float64 copies, CPU execution)."""
+    import psutil
+
+    if n_frames == 0:
+        return 0
+    free = psutil.virtual_memory().available
+    if free <= 0:
+        return max(1, min(_FS_CPU_MAX_BATCH, max_frames, n_frames))
+    block = int(free / (frame_bytes64 * _FS_PEAK_COPIES))
+    return max(1, min(_FS_CPU_MAX_BATCH, max_frames, block, n_frames))
+
+
+class AutoBatchImageSharpenFS(io.ComfyNode):
+    """Frequency-separation sharpening with auto-batched GPU execution."""
+
+    @classmethod
+    def define_schema(cls) -> io.Schema:
+        return io.Schema(
+            node_id="AutoBatchImageSharpenFS",
+            display_name="AutoBatch Image Sharpen FS",
+            search_aliases=["autobatch sharpen", "频率分离锐化", "自动分批锐化"],
+            category="Musefish/Image",
+            description=(
+                "Frequency-separation sharpening (hard/linear light) that runs the "
+                "float64 GPU math in bounded batches sized to the free VRAM, so long "
+                "4K sequences no longer OOM. The low-pass blur runs on CPU."
+            ),
+            inputs=[
+                io.Image.Input("images"),
+                io.Combo.Input("method", options=["hard", "linear"], default="hard"),
+                io.Combo.Input("blur_type", options=["median", "gaussian"], default="median"),
+                io.Int.Input("intensity", default=6, min=1, max=31, step=1),
+                io.Int.Input("frames_per_batch", default=0, min=0, max=128, step=1),
+                io.Combo.Input("device", options=["auto", "gpu", "cpu"], default="auto"),
+            ],
+            outputs=[io.Image.Output()],
+        )
+
+    @classmethod
+    def execute(
+        cls,
+        images: Input.Image,
+        method: str,
+        blur_type: str,
+        intensity: int,
+        frames_per_batch: int = 0,
+        device: str = "auto",
+    ) -> io.NodeOutput:
+        n = images.shape[0]
+        if n == 0:
+            return io.NodeOutput(images)
+        frame_bytes64 = images.shape[1] * images.shape[2] * 3 * 8  # float64 NHWC bytes
+        fixed = int(frames_per_batch)
+
+        if device == "cpu":
+            work = torch.device("cpu")
+            batch = fixed if fixed > 0 else _fs_cpu_batch(n, frame_bytes64, _FS_CPU_MAX_BATCH)
+        elif fixed > 0:
+            work = comfy.model_management.get_torch_device()
+            batch = fixed
+        else:
+            batch = _fs_gpu_batch(n, frame_bytes64, _FS_GPU_MAX_BATCH)
+            if batch >= 1:
+                work = comfy.model_management.get_torch_device()
+            elif device == "auto":
+                work = torch.device("cpu")
+                batch = _fs_cpu_batch(n, frame_bytes64, _FS_CPU_MAX_BATCH)
+            else:  # explicit "gpu": force one frame per chunk
+                work = comfy.model_management.get_torch_device()
+                batch = 1
+
+        chunks = []
+        for start in range(0, n, batch):
+            chunk = images[start : start + batch]
+            low_pass = _fs_low_pass_cpu(chunk, blur_type, int(intensity))  # CPU [B,H,W,3]
+            orig = chunk.to(device=work, dtype=torch.float64).permute(0, 3, 1, 2)
+            lp = low_pass.to(device=work, dtype=torch.float64).permute(0, 3, 1, 2)
+            if method == "hard":
+                hp = _fs_hard_light_freq_sep(orig, lp)
+                sharp = _fs_hard_light_blend(orig, hp)
+            else:
+                hp = _fs_linear_light_freq_sep(orig, lp)
+                sharp = _fs_linear_light_blend(orig, hp)
+            chunks.append(sharp.permute(0, 2, 3, 1).float().cpu())
+            del low_pass, orig, lp, hp, sharp
+            comfy.model_management.throw_exception_if_processing_interrupted()
+        return io.NodeOutput(torch.cat(chunks, dim=0))
+
+
 class MusefishExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [MusefishPiDBatchVideoUpscale, MusefishAntiflicker]
+        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS]
 
 
 async def comfy_entrypoint() -> MusefishExtension:

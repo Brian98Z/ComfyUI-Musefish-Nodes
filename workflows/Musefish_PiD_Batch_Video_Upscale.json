@@ -516,7 +516,7 @@
     },
     {
       "id": 13,
-      "type": "MusefishAntiflicker",
+      "type": "AutoBatchAntiflicker",
       "pos": [
         1489.954358772637,
         304.11469013272006
@@ -567,7 +567,7 @@
       "properties": {
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ver": "a5d1f13f07fff0e93793f8cd3fb4af635e00d496",
-        "Node name for S&R": "MusefishAntiflicker",
+        "Node name for S&R": "AutoBatchAntiflicker",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -576,7 +576,9 @@
       },
       "widgets_values": [
         15,
-        20
+        20,
+        0,
+        "auto"
       ]
     },
     {
