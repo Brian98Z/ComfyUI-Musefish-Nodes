@@ -74,6 +74,19 @@ output    = hard/linear light 混合(images, high_pass)
 
 推荐起点：`hard / median / 12 / 0 / auto`。锐化强度不足时提高 `intensity`（4K 超分软边建议 `12` 起），出现过锐/噪点放大时降低 `intensity` 或改 `gaussian`。
 
+## 效果案例
+
+原视频 480×832（33 帧，约 2 秒）经 PiD 4x 超分至 **2304×4096（4K 竖屏）**，再经 `AutoBatch Antiflicker`（15/20/0/auto）去频闪 + `AutoBatch Image Sharpen FS`（hard/median/12/0/auto）频率分离锐化，最终 h264 yuv420p10le 输出。
+
+| 案例 | 文件 |
+| --- | --- |
+| 原视频 | [案例-原视频.mp4](assets/案例-原视频.mp4) |
+| 4 倍超分 + 后处理 | [案例-4倍超分.mp4](assets/案例-4倍超分.mp4) |
+
+![工作流界面截图](assets/工作流截图.png)
+
+> 说明：超分视频为 4K 竖屏（2304×4096），文件较大，下载后建议本地播放器或剪辑软件查看；对比细节可重点看发丝、衣物纹理与主体边缘线条的锐度。
+
 ## 模板工作流结构
 
 当前模板 `Musefish_PiD_Batch_Video_Upscale.json` 的处理顺序：
