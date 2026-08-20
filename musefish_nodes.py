@@ -134,6 +134,46 @@ def _temporal_bilateral(
     return (seq + previous * prev_weight + following * next_weight) / weight_sum
 
 
+# Antiflicker processes frames on the GPU in bounded chunks so a long video
+# never materializes the whole sequence (plus its neighbor/weight copies) in
+# either VRAM or system RAM.
+_ANTIFLICKER_CHUNK = 8
+
+
+def _temporal_bilateral_chunked(
+    seq: torch.Tensor,
+    strength: float,
+    guide: Optional[torch.Tensor] = None,
+    guide_strength: Optional[float] = None,
+    chunk: int = _ANTIFLICKER_CHUNK,
+) -> torch.Tensor:
+    """Chunked variant of ``_temporal_bilateral``.
+
+    Each chunk carries one extra source frame on both sides so the interior
+    frames still see their true neighbors. Boundary chunks clamp to the
+    sequence edges, matching the full-sequence result exactly.
+    """
+    n = seq.shape[0]
+    if strength <= 0.0 or n < 2:
+        return seq.clone()
+    if n <= chunk + 2:
+        return _temporal_bilateral(seq, strength, guide, guide_strength)
+
+    out = torch.empty_like(seq)
+    for start in range(0, n, chunk):
+        end = min(n, start + chunk)
+        lo = max(0, start - 1)
+        hi = min(n, end + 1)
+        part = _temporal_bilateral(
+            seq[lo:hi],
+            strength,
+            guide[lo:hi] if guide is not None else None,
+            guide_strength,
+        )
+        out[start:end] = part[start - lo : end - lo]
+    return out
+
+
 class MusefishAntiflicker(io.ComfyNode):
     """Ghost-resistant temporal flicker suppression on an IMAGE frame batch.
 
@@ -171,17 +211,23 @@ class MusefishAntiflicker(io.ComfyNode):
     ) -> io.NodeOutput:
         if images is None or images.ndim != 4 or images.shape[-1] < 3:
             raise ValueError("images must be an RGB frame batch [N,H,W,3]")
-        rgb = images[:, :, :, :3].float()
+        device = comfy.model_management.get_torch_device()
+        # The upstream PiD node delivers the decoded batch on the CPU. Run the
+        # whole bilateral pass on the GPU in bounded chunks so a long video
+        # does not blow up system RAM, then move the result back to the
+        # input's device so downstream behavior is unchanged.
+        rgb = images[:, :, :, :3].float().to(device)
         y, u, v = _rgb_to_yuv601(rgb)
         y_plane = y.squeeze(-1)
-        yf = _temporal_bilateral(y_plane, float(luma_tmp)).unsqueeze(-1)
-        uf = _temporal_bilateral(
+        yf = _temporal_bilateral_chunked(y_plane, float(luma_tmp)).unsqueeze(-1)
+        uf = _temporal_bilateral_chunked(
             u.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
         ).unsqueeze(-1)
-        vf = _temporal_bilateral(
+        vf = _temporal_bilateral_chunked(
             v.squeeze(-1), float(chroma_tmp), y_plane, float(luma_tmp)
         ).unsqueeze(-1)
-        return io.NodeOutput(_yuv601_to_rgb(yf, uf, vf))
+        result = _yuv601_to_rgb(yf, uf, vf)
+        return io.NodeOutput(result.to(images.device))
 
 
 class MusefishPiDBatchVideoUpscale(io.ComfyNode):
