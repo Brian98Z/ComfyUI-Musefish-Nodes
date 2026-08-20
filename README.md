@@ -179,6 +179,11 @@ decode VAE:
 代码内固定为 `pixel_space`，无需连接节点
 ```
 
+模型下载：
+
+- **UNET 与 CLIP（PixelDiT/PiD 系列）**：<https://www.modelscope.cn/models/Comfy-Org/PixelDiT/files>
+- **VAE（encode_vae，z-image/flux1 通用）**：<https://www.modelscope.cn/models/Comfy-Org/z_image_turbo/tree/master/split_files/vae>
+
 ## 长视频处理建议
 
 - 先将 `VHS_LoadVideo.frame_load_cap` 设为少量帧验证，例如 `2` 或 `4`。
