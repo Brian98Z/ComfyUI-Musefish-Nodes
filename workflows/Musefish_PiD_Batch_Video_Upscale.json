@@ -583,7 +583,7 @@
     },
     {
       "id": 14,
-      "type": "ImageCASharpening+",
+      "type": "AutoBatchImageSharpenFS",
       "pos": [
         1489.954358772637,
         522.6220219354707
@@ -597,20 +597,9 @@
       "mode": 0,
       "inputs": [
         {
-          "label": "图像",
-          "localized_name": "image",
-          "name": "image",
+          "name": "images",
           "type": "IMAGE",
           "link": 21
-        },
-        {
-          "localized_name": "数量",
-          "name": "amount",
-          "type": "FLOAT",
-          "widget": {
-            "name": "amount"
-          },
-          "link": null
         }
       ],
       "outputs": [
@@ -624,11 +613,11 @@
           ]
         }
       ],
-      "title": "图像对比度自适应锐化",
+      "title": null,
       "properties": {
-        "cnr_id": "comfyui_essentials",
+        "cnr_id": "ComfyUI-Musefish-Nodes",
         "ver": "1.1.0",
-        "Node name for S&R": "ImageCASharpening+",
+        "Node name for S&R": "AutoBatchImageSharpenFS",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -636,7 +625,11 @@
         }
       },
       "widgets_values": [
-        0.9
+        "hard",
+        "median",
+        12,
+        0,
+        "auto"
       ]
     },
     {

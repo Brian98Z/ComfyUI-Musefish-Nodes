@@ -85,7 +85,7 @@ LoadVideo
   └── FPS ─────────────────────────────────┤
                                            ▼
 Musefish PiD Batch Video Upscale → AutoBatch Antiflicker(15/20/0/auto)
-                                  → ImageCASharpening+(0.9)
+                                  → AutoBatch Image Sharpen FS(hard/median/12/0/auto)
                                   → VHS_VideoCombine(yuv420p)
 ```
 
@@ -220,5 +220,5 @@ Musefish PiD Batch Video Upscale
 
 - `__init__.py`：ComfyUI 扩展入口
 - `musefish_nodes.py`：PiD 超分、自动分批频闪抑制与频率分离锐化节点实现
-- `workflows/Musefish_PiD_Batch_Video_Upscale.json`：包含 PiD → AutoBatch Antiflicker(15/20/0/auto) → 自适应锐化的模板工作流
+- `workflows/Musefish_PiD_Batch_Video_Upscale.json`：包含 PiD → AutoBatch Antiflicker(15/20/0/auto) → AutoBatch Image Sharpen FS(12/0/auto) 的模板工作流
 - 模板 UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`
