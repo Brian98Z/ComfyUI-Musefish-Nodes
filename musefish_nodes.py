@@ -8,6 +8,7 @@ preloaded once for the execution and reused for every batch.
 from __future__ import annotations
 
 from fractions import Fraction
+from pathlib import Path
 from typing import Optional
 
 import torch
@@ -20,6 +21,9 @@ import comfy.utils
 import node_helpers
 from comfy_api.latest import ComfyExtension, Input, InputImpl, Types, io
 from typing_extensions import override
+from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel, MusefishUniverSRSpeechAudio
+
+
 
 
 _LATENT_FORMATS = ["flux", "sd3", "sdxl", "qwenimage"]
@@ -577,10 +581,12 @@ class AutoBatchImageSharpenFS(io.ComfyNode):
         return io.NodeOutput(torch.cat(chunks, dim=0))
 
 
+
+
 class MusefishExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS]
+        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS, MusefishUniverSRModel, MusefishUniverSRGeneralAudio, MusefishUniverSRSpeechAudio]
 
 
 async def comfy_entrypoint() -> MusefishExtension:

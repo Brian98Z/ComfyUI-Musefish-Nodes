@@ -1,0 +1,11 @@
+# Torch and TorchAudio are supplied together by ComfyUI. Do not replace its CUDA build.
+numpy>=1.24
+scipy>=1.10
+soundfile>=0.12.1
+PyYAML>=6.0
+huggingface_hub>=0.23
+einops>=0.7
+timm>=1.0
+torchdiffeq>=0.2.4
+tqdm>=4.66
+# stem_mix additionally requires Demucs 4.x; see README for optional installation.

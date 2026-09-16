@@ -1,0 +1,985 @@
+{
+  "config": {},
+  "extra": {
+    "anomalous_hashes": {},
+    "ds": {
+      "offset": [
+        372.3042392401748,
+        135.5815969290741
+      ],
+      "scale": 1.2839025177495036
+    },
+    "links_added_by_ue": [],
+    "ue_links": [],
+    "workflowRendererVersion": "LG",
+    "musefish_template": {
+      "name": "UniverSR 音频 / 语音超分（16GB 显存参考）",
+      "reference_vram_gb": 16,
+      "source_workflow_id": "6e417a01-39fa-461d-9f27-484c97aeef2e",
+      "usage": "加载自己的音频；默认启用音乐分支，语音分支旁路。使用左侧分组开关切换。音乐分块30秒，语音分块20秒；显存不足时减小chunk_sec。参考配置不代表所有输入下的显存保证。",
+      "dependencies": [
+        "ComfyUI-Musefish-Nodes",
+        "ComfyUI-Custom-Scripts",
+        "rgthree-comfy"
+      ]
+    }
+  },
+  "groups": [
+    {
+      "bounding": [
+        -90.8784904775369,
+        49.18121366052971,
+        1398.5428537413752,
+        627.4463020752805
+      ],
+      "color": "#3f789e",
+      "flags": {},
+      "id": 1,
+      "title": "音频超分｜16GB显存参考"
+    },
+    {
+      "bounding": [
+        -91.15722596675322,
+        697.525970731393,
+        1398.5428537413752,
+        627.4463020752805
+      ],
+      "color": "#3f789e",
+      "flags": {},
+      "id": 2,
+      "title": "语音超分｜16GB显存参考"
+    }
+  ],
+  "id": "6e417a01-39fa-461d-9f27-484c97aeef2e",
+  "last_link_id": 20,
+  "last_node_id": 16,
+  "links": [
+    [
+      11,
+      9,
+      0,
+      16,
+      0,
+      "AUDIO"
+    ],
+    [
+      12,
+      11,
+      0,
+      16,
+      1,
+      "STRING"
+    ],
+    [
+      15,
+      16,
+      0,
+      12,
+      0,
+      "AUDIO"
+    ],
+    [
+      16,
+      16,
+      1,
+      13,
+      0,
+      "STRING"
+    ],
+    [
+      17,
+      1,
+      0,
+      15,
+      0,
+      "AUDIO"
+    ],
+    [
+      18,
+      7,
+      0,
+      15,
+      1,
+      "STRING"
+    ],
+    [
+      19,
+      15,
+      0,
+      4,
+      0,
+      "AUDIO"
+    ],
+    [
+      20,
+      15,
+      1,
+      5,
+      0,
+      "STRING"
+    ]
+  ],
+  "nodes": [
+    {
+      "flags": {},
+      "id": 5,
+      "inputs": [
+        {
+          "link": 20,
+          "localized_name": "文本",
+          "name": "text",
+          "type": "STRING"
+        }
+      ],
+      "mode": 0,
+      "order": 10,
+      "outputs": [
+        {
+          "label": "字符串",
+          "links": null,
+          "localized_name": "字符串",
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING"
+        }
+      ],
+      "pos": [
+        1028.8903717283047,
+        319.73087887729116
+      ],
+      "properties": {
+        "Node name for S&R": "ShowText|pysssss",
+        "cnr_id": "comfyui-custom-scripts",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "1.2.5"
+      },
+      "size": [
+        268.7739915355337,
+        346.896636858519
+      ],
+      "title": "展示文本",
+      "type": "ShowText|pysssss",
+      "widgets_values": [
+        ""
+      ],
+      "widgets_values_named": {
+        "text_0": ""
+      }
+    },
+    {
+      "flags": {},
+      "id": 13,
+      "inputs": [
+        {
+          "link": 16,
+          "localized_name": "文本",
+          "name": "text",
+          "type": "STRING"
+        }
+      ],
+      "mode": 4,
+      "order": 8,
+      "outputs": [
+        {
+          "label": "字符串",
+          "links": null,
+          "localized_name": "字符串",
+          "name": "STRING",
+          "shape": 6,
+          "type": "STRING"
+        }
+      ],
+      "pos": [
+        1028.6116362390885,
+        968.0756359481545
+      ],
+      "properties": {
+        "Node name for S&R": "ShowText|pysssss",
+        "cnr_id": "comfyui-custom-scripts",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "1.2.5"
+      },
+      "size": [
+        268.7739915355337,
+        346.896636858519
+      ],
+      "title": "展示文本",
+      "type": "ShowText|pysssss",
+      "widgets_values": [
+        ""
+      ],
+      "widgets_values_named": {
+        "text_0": ""
+      }
+    },
+    {
+      "flags": {},
+      "id": 7,
+      "inputs": [
+        {
+          "link": null,
+          "localized_name": "model",
+          "name": "model",
+          "type": "COMBO",
+          "widget": {
+            "name": "model"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "download",
+          "name": "download",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "download"
+          }
+        }
+      ],
+      "mode": 0,
+      "order": 0,
+      "outputs": [
+        {
+          "links": [
+            18
+          ],
+          "localized_name": "model_cache",
+          "name": "model_cache",
+          "type": "STRING"
+        }
+      ],
+      "pos": [
+        -80.8784904775369,
+        363.14738832737197
+      ],
+      "properties": {
+        "Node name for S&R": "MusefishUniverSRModel",
+        "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "d2def4871d3de7b00201b5ccfc925a8b9e704c56"
+      },
+      "size": [
+        317.27451067563857,
+        120.7519414275958
+      ],
+      "type": "MusefishUniverSRModel",
+      "widgets_values": [
+        "general",
+        true
+      ],
+      "widgets_values_named": {
+        "download": true,
+        "model": "general"
+      }
+    },
+    {
+      "flags": {},
+      "id": 11,
+      "inputs": [
+        {
+          "link": null,
+          "localized_name": "model",
+          "name": "model",
+          "type": "COMBO",
+          "widget": {
+            "name": "model"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "download",
+          "name": "download",
+          "type": "BOOLEAN",
+          "widget": {
+            "name": "download"
+          }
+        }
+      ],
+      "mode": 4,
+      "order": 1,
+      "outputs": [
+        {
+          "links": [
+            12
+          ],
+          "localized_name": "model_cache",
+          "name": "model_cache",
+          "type": "STRING"
+        }
+      ],
+      "pos": [
+        -81.15722596675322,
+        1011.4921453982354
+      ],
+      "properties": {
+        "Node name for S&R": "MusefishUniverSRModel",
+        "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "d2def4871d3de7b00201b5ccfc925a8b9e704c56"
+      },
+      "size": [
+        317.27451067563857,
+        120.7519414275958
+      ],
+      "type": "MusefishUniverSRModel",
+      "widgets_values": [
+        "speech",
+        true
+      ],
+      "widgets_values_named": {
+        "download": true,
+        "model": "speech"
+      }
+    },
+    {
+      "flags": {},
+      "id": 9,
+      "inputs": [
+        {
+          "link": null,
+          "localized_name": "音频",
+          "name": "audio",
+          "type": "COMBO",
+          "widget": {
+            "name": "audio"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "音频UI",
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "widget": {
+            "name": "audioUI"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "选择文件上传",
+          "name": "upload",
+          "type": "AUDIOUPLOAD",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "mode": 4,
+      "order": 2,
+      "outputs": [
+        {
+          "links": [
+            11
+          ],
+          "localized_name": "音频",
+          "name": "AUDIO",
+          "type": "AUDIO"
+        }
+      ],
+      "pos": [
+        -81.15598111689386,
+        769.5993368656586
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio",
+        "cnr_id": "comfy-core",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {
+            "audio": true
+          }
+        },
+        "ver": "0.33.1"
+      },
+      "size": [
+        315,
+        136
+      ],
+      "type": "LoadAudio",
+      "widgets_values": [
+        "测试语音.wav",
+        null,
+        null
+      ],
+      "widgets_values_named": {
+        "audio": "测试语音.wav",
+        "upload": null
+      }
+    },
+    {
+      "flags": {},
+      "id": 12,
+      "inputs": [
+        {
+          "link": 15,
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        },
+        {
+          "link": null,
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "format",
+          "name": "format",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "widget": {
+            "name": "format"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "audioUI",
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "widget": {
+            "name": "audioUI"
+          }
+        }
+      ],
+      "mode": 4,
+      "order": 7,
+      "outputs": [
+        {
+          "links": null,
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        }
+      ],
+      "pos": [
+        1026.9472649773147,
+        769.0608633133878
+      ],
+      "properties": {
+        "Node name for S&R": "SaveAudioAdvanced",
+        "cnr_id": "comfy-core",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "0.35.0"
+      },
+      "size": [
+        270,
+        136
+      ],
+      "type": "SaveAudioAdvanced",
+      "widgets_values": [
+        "audio/Musefish_UniverSR",
+        "flac"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "audio/Musefish_UniverSR",
+        "format": "flac"
+      }
+    },
+    {
+      "flags": {},
+      "id": 14,
+      "inputs": [],
+      "mode": 0,
+      "order": 3,
+      "outputs": [
+        {
+          "label": "可选连接",
+          "links": null,
+          "name": "OPT_CONNECTION",
+          "type": "*"
+        }
+      ],
+      "pos": [
+        -360.5042481135182,
+        80.16511644483016
+      ],
+      "properties": {
+        "customSortAlphabet": "",
+        "matchColors": "",
+        "matchTitle": "",
+        "showAllGraphs": true,
+        "showNav": true,
+        "sort": "position",
+        "toggleRestriction": "default",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        }
+      },
+      "size": [
+        233.56725012589686,
+        82
+      ],
+      "type": "Fast Groups Bypasser (rgthree)"
+    },
+    {
+      "flags": {},
+      "id": 16,
+      "inputs": [
+        {
+          "link": 11,
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        },
+        {
+          "link": 12,
+          "localized_name": "model_cache",
+          "name": "model_cache",
+          "shape": 7,
+          "type": "STRING"
+        },
+        {
+          "link": null,
+          "localized_name": "input_sr",
+          "name": "input_sr",
+          "type": "COMBO",
+          "widget": {
+            "name": "input_sr"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "channel_mode",
+          "name": "channel_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "channel_mode"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "ode_method",
+          "name": "ode_method",
+          "type": "COMBO",
+          "widget": {
+            "name": "ode_method"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "ode_steps",
+          "name": "ode_steps",
+          "type": "INT",
+          "widget": {
+            "name": "ode_steps"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "guidance",
+          "name": "guidance",
+          "type": "FLOAT",
+          "widget": {
+            "name": "guidance"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "chunk_sec",
+          "name": "chunk_sec",
+          "type": "INT",
+          "widget": {
+            "name": "chunk_sec"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          }
+        }
+      ],
+      "mode": 4,
+      "order": 5,
+      "outputs": [
+        {
+          "links": [
+            15
+          ],
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        },
+        {
+          "links": [
+            16
+          ],
+          "localized_name": "log",
+          "name": "log",
+          "type": "STRING"
+        }
+      ],
+      "pos": [
+        417.34945388086715,
+        769.1346245882495
+      ],
+      "properties": {
+        "Node name for S&R": "MusefishUniverSRSpeechAudio",
+        "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "d2def4871d3de7b00201b5ccfc925a8b9e704c56"
+      },
+      "size": [
+        412.47570561134285,
+        517.0135304096596
+      ],
+      "type": "MusefishUniverSRSpeechAudio",
+      "widgets_values": [
+        "auto",
+        "auto",
+        "midpoint",
+        4,
+        1.5,
+        20,
+        1088854435983727,
+        "randomize"
+      ],
+      "widgets_values_named": {
+        "channel_mode": "auto",
+        "chunk_sec": 20,
+        "control_after_generate": "randomize",
+        "guidance": 1.5,
+        "input_sr": "auto",
+        "ode_method": "midpoint",
+        "ode_steps": 4,
+        "seed": 1088854435983727
+      }
+    },
+    {
+      "flags": {},
+      "id": 1,
+      "inputs": [
+        {
+          "link": null,
+          "localized_name": "音频",
+          "name": "audio",
+          "type": "COMBO",
+          "widget": {
+            "name": "audio"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "音频UI",
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "widget": {
+            "name": "audioUI"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "选择文件上传",
+          "name": "upload",
+          "type": "AUDIOUPLOAD",
+          "widget": {
+            "name": "upload"
+          }
+        }
+      ],
+      "mode": 0,
+      "order": 4,
+      "outputs": [
+        {
+          "links": [
+            17
+          ],
+          "localized_name": "音频",
+          "name": "AUDIO",
+          "type": "AUDIO"
+        }
+      ],
+      "pos": [
+        -80.87724562767754,
+        119.1812136605297
+      ],
+      "properties": {
+        "Node name for S&R": "LoadAudio",
+        "cnr_id": "comfy-core",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {
+            "audio": true
+          }
+        },
+        "ver": "0.33.1"
+      },
+      "size": [
+        315,
+        136
+      ],
+      "type": "LoadAudio",
+      "widgets_values": [
+        "测试歌曲.mp3",
+        null,
+        null
+      ],
+      "widgets_values_named": {
+        "audio": "测试歌曲.mp3",
+        "upload": null
+      }
+    },
+    {
+      "flags": {},
+      "id": 15,
+      "inputs": [
+        {
+          "link": 17,
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        },
+        {
+          "link": 18,
+          "localized_name": "model_cache",
+          "name": "model_cache",
+          "shape": 7,
+          "type": "STRING"
+        },
+        {
+          "link": null,
+          "localized_name": "mode",
+          "name": "mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "mode"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "input_sr",
+          "name": "input_sr",
+          "type": "COMBO",
+          "widget": {
+            "name": "input_sr"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "channel_mode",
+          "name": "channel_mode",
+          "type": "COMBO",
+          "widget": {
+            "name": "channel_mode"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "ode_method",
+          "name": "ode_method",
+          "type": "COMBO",
+          "widget": {
+            "name": "ode_method"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "ode_steps",
+          "name": "ode_steps",
+          "type": "INT",
+          "widget": {
+            "name": "ode_steps"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "guidance",
+          "name": "guidance",
+          "type": "FLOAT",
+          "widget": {
+            "name": "guidance"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "chunk_sec",
+          "name": "chunk_sec",
+          "type": "INT",
+          "widget": {
+            "name": "chunk_sec"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "seed",
+          "name": "seed",
+          "type": "INT",
+          "widget": {
+            "name": "seed"
+          }
+        }
+      ],
+      "mode": 0,
+      "order": 6,
+      "outputs": [
+        {
+          "links": [
+            19
+          ],
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        },
+        {
+          "links": [
+            20
+          ],
+          "localized_name": "log",
+          "name": "log",
+          "type": "STRING"
+        }
+      ],
+      "pos": [
+        417.6104312896998,
+        120.21218123609233
+      ],
+      "properties": {
+        "Node name for S&R": "MusefishUniverSRGeneralAudio",
+        "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "d2def4871d3de7b00201b5ccfc925a8b9e704c56"
+      },
+      "size": [
+        410.5959092548361,
+        539.1299366465964
+      ],
+      "type": "MusefishUniverSRGeneralAudio",
+      "widgets_values": [
+        "sr_master",
+        "auto",
+        "auto",
+        "midpoint",
+        4,
+        1.5,
+        30,
+        1038697533422871,
+        "randomize"
+      ],
+      "widgets_values_named": {
+        "channel_mode": "auto",
+        "chunk_sec": 30,
+        "control_after_generate": "randomize",
+        "guidance": 1.5,
+        "input_sr": "auto",
+        "mode": "sr_master",
+        "ode_method": "midpoint",
+        "ode_steps": 4,
+        "seed": 1038697533422871
+      }
+    },
+    {
+      "flags": {},
+      "id": 4,
+      "inputs": [
+        {
+          "link": 19,
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        },
+        {
+          "link": null,
+          "localized_name": "filename_prefix",
+          "name": "filename_prefix",
+          "type": "STRING",
+          "widget": {
+            "name": "filename_prefix"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "format",
+          "name": "format",
+          "type": "COMFY_DYNAMICCOMBO_V3",
+          "widget": {
+            "name": "format"
+          }
+        },
+        {
+          "link": null,
+          "localized_name": "audioUI",
+          "name": "audioUI",
+          "type": "AUDIO_UI",
+          "widget": {
+            "name": "audioUI"
+          }
+        }
+      ],
+      "mode": 0,
+      "order": 9,
+      "outputs": [
+        {
+          "links": null,
+          "localized_name": "audio",
+          "name": "audio",
+          "type": "AUDIO"
+        }
+      ],
+      "pos": [
+        1027.2260004665309,
+        120.71610624252442
+      ],
+      "properties": {
+        "Node name for S&R": "SaveAudioAdvanced",
+        "cnr_id": "comfy-core",
+        "ue_properties": {
+          "input_ue_unconnectable": {},
+          "version": "7.8",
+          "widget_ue_connectable": {}
+        },
+        "ver": "0.35.0"
+      },
+      "size": [
+        270,
+        136
+      ],
+      "type": "SaveAudioAdvanced",
+      "widgets_values": [
+        "audio/Musefish_UniverSR",
+        "flac"
+      ],
+      "widgets_values_named": {
+        "filename_prefix": "audio/Musefish_UniverSR",
+        "format": "flac"
+      }
+    }
+  ],
+  "revision": 0,
+  "version": 0.4
+}
