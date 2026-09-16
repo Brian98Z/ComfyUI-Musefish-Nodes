@@ -15,7 +15,7 @@
 - **`AutoBatch Antiflicker`**：对称时间双边滤波去频闪，运动边缘不拖影；`frames_per_batch=0` 自动分批 + `device=auto` CPU 卸载
 - **`AutoBatch Image Sharpen FS`**：频率分离锐化（hard/linear light），针对 4K 超分软边；同样自动分批 + CPU 卸载
 
-**快速上手**：PiD 超分输出 → `AutoBatch Antiflicker` → `AutoBatch Image Sharpen FS` → `VHS_VideoCombine`，参数全默认即可。
+**快速上手**：PiD 超分输出 → `AutoBatch Antiflicker` → `AutoBatch Image Sharpen FS` → `VHS_VideoCombine`。人像推荐使用模板的低毛刺参数，避免强锐化把发际线、眼睑和脸颊轮廓变成颗粒碎边。
 
 示例模板工作流：`workflows/Musefish_PiD_Batch_Video_Upscale.json`（UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`）。
 该模板在 PiD 输出后接入 `AutoBatchAntiflicker`，再进行自适应锐化与视频合并。
@@ -49,7 +49,7 @@ VHS_LoadVideo AUDIO ────────────────────
 | `frames_per_batch` | `0` | 每批处理帧数；`0` = 按设备空闲内存自动计算 |
 | `device` | `auto` | 计算设备：`auto`（GPU 优先，显存不足自动降级 CPU）/ `gpu` / `cpu` |
 
-推荐起点为 `15/20`、`frames_per_batch=0`、`device=auto`。节点使用当前帧与前后相邻源帧，不使用递归滤波历史，因此运动主体不会产生单向拖尾。输出视频建议在 `VHS_VideoCombine` 使用 `yuv420p10le`，减少高光区域的色带和色度伪影。
+推荐起点为 `15/20`、`device=auto`。16GB 参考模板后处理 `frames_per_batch=1` 以限制显存峰值；设为 0 可按空闲内存自动估算。算法使用相邻源帧，不递归传播历史，但快速运动仍需检查拖影。模板保留兼容性较好的 H.264 `yuv420p`；需要10-bit输出时另选支持的编码器，不要只修改像素格式。
 
 如果主体出现拖影，优先降低 `luma_tmp`；如果只有背景颜色跳变，保持亮度参数不变、单独提高 `chroma_tmp`。不要把两个参数同时大幅提高。
 
@@ -57,21 +57,21 @@ VHS_LoadVideo AUDIO ────────────────────
 
 节点 ID：`AutoBatchImageSharpenFS`
 
-功能：频率分离锐化（frequency separation），与 RES4LYF `Image Sharpen FS` 算法一致，但将 float64 频率分离运算**自动分批**执行，长 4K 视频序列不再爆显存。
+功能：基于频率分离的浮点锐化。使用 float32 分批运算、软阈值与亮度梯度边缘保护，减少低幅噪声和轮廓高频被过度增强；不再与旧 RES4LYF 输出逐像素等价。
 
-处理流程（与原节点逐层一致，已验证三层输出 diff = 0）：
+处理流程：
 
 ```text
-low_pass  = median/gaussian 模糊(images, intensity)   # CPU，不占显存
-high_pass = 频率分离(images, low_pass)                 # float64，GPU/CPU 分批
-output    = hard/linear light 混合(images, high_pass)
+low_pass  = 浮点 median/gaussian 模糊(images, intensity)  # CPU
+detail    = hard/linear light 混合结果 - images            # float32
+output    = clamp(images + amount × 软阈值(detail) × 边缘保护, 0, 1)
 ```
 
 #### 自动分批与设备卸载
 
-- float64 频率分离按设备空闲内存自动分批（GPU 按显存、CPU 按系统内存），`frames_per_batch=0` 时全自动；`>0` 手动固定。
-- `device=auto`：GPU 优先，显存连 1 帧都放不下时自动降级 CPU。
-- 低通模糊（OpenCV median/gaussian）始终在 CPU 上逐帧执行，不占显存。
+- float32 运算按空闲内存的保守预算分批；去频闪预算同时计入前后邻帧。输出预分配，避免 list + cat 造成额外整段副本。
+- 遇到内存不足时缩小当前批次并重试，不跳帧；`auto` 可在单帧 GPU OOM 后回退 CPU，显式 `gpu` 不静默换设备。非内存异常与用户中断继续抛出。
+- Gaussian 使用 OpenCV 浮点低通；median 小核使用 OpenCV，大核使用 SciPy 浮点中值滤波，避免 uint8 往返量化。大核 median 可能明显更慢，人像默认建议 Gaussian。
 
 参数：
 
@@ -79,15 +79,17 @@ output    = hard/linear light 混合(images, high_pass)
 | --- | ---: | --- |
 | `method` | `hard` | 混合方式：`hard`（hard light）/ `linear`（linear light） |
 | `blur_type` | `median` | 低通方式：`median`（保边缘）/ `gaussian` |
-| `intensity` | `6` | 低通模糊强度（核半径约 `intensity-1`） |
+| `intensity` | `6` | 决定低通核尺寸：至少3，基于 intensity−1 取奇数；不是锐化混合强度 |
 | `frames_per_batch` | `0` | 每批处理帧数；`0` = 按设备空闲内存自动计算 |
 | `device` | `auto` | 计算设备：`auto` / `gpu` / `cpu` |
+| `amount` | `1.0` | 锐化残差混合强度，0–2；人像模板为 **0.45**，0为不增强 |
+| `noise_threshold` | `0.0` | 0–1范围的残差软阈值；人像模板为 **0.01**，弱于阈值的纹理不额外增强 |
 
-推荐起点：`hard / median / 12 / 0 / auto`。锐化强度不足时提高 `intensity`（4K 超分软边建议 `12` 起），出现过锐/噪点放大时降低 `intensity` 或改 `gaussian`。
+人像参考：`hard / gaussian / 6 / 1 / auto`，`amount=0.45`、`noise_threshold=0.01`。先观察发际线、眼睑、脸颊边缘，再少量提高 amount；不要以强 median/12 锐化制造“清晰感”。此处理抑制锐化引入的毛刺，不保证修复模型生成的所有伪影，也不会恢复原片没有的真实细节。
 
 ### 效果案例
 
-原视频 480×832（33 帧，约 2 秒）经 PiD 4x 超分至 **2304×4096（4K 竖屏）**，再经 `AutoBatch Antiflicker`（15/20/0/auto）去频闪 + `AutoBatch Image Sharpen FS`（hard/median/12/0/auto）频率分离锐化，最终 h264 yuv420p10le 输出。
+以下为旧版效果案例：原视频 480×832（33 帧，约 2 秒）经 PiD 4x 超分至 **2304×4096**，再经去频闪与 hard/median/12 锐化。历史素材保留用于对照，不代表当前人像推荐配置。
 
 | 案例 | 文件 |
 | --- | --- |
@@ -108,8 +110,8 @@ LoadVideo
   ├── AUDIO ───────────────────────────────┐
   └── FPS ─────────────────────────────────┤
                                            ▼
-Musefish PiD Batch Video Upscale → AutoBatch Antiflicker(15/20/0/auto)
-                                  → AutoBatch Image Sharpen FS(hard/median/12/0/auto)
+Musefish PiD Batch Video Upscale → AutoBatch Antiflicker(15/20/1/auto)
+                                  → AutoBatch Image Sharpen FS(hard/gaussian/6/1/auto, amount=0.45, noise_threshold=0.01)
                                   → VHS_VideoCombine(yuv420p)
 ```
 
@@ -128,10 +130,34 @@ PiD 的原始 `VIDEO` 输出不经过后续图像节点；最终交付应使用�
 1. 按内置的 `1024` 长边统一输入帧尺寸；
 2. 使用输入 VAE 编码低分辨率帧；
 3. 按 `batch_size` 分批执行 PiD 采样；
-4. 使用代码内固定的 `pixel_space` VAE 解码超分结果；
+4. 将 PiD 像素空间采样结果直接以 CPU float32 从 [-1,1] 映射到 [0,1]，无需解码 VAE；
 5. 合并所有帧并保留音频、FPS。
 
-扩散模型在节点执行开始时预加载，并在所有帧批次间复用同一个模型对象。
+VAE 预编码与 PiD 采样分开执行，避免每批反复换入换出模型。低分辨率 latent 暂存 CPU、用后释放；4K 输出直接写入预分配 CPU 张量。采样使用 ComfyUI 标准显存管理，不强制全量模型驻留；VAE/采样 OOM 时当前批次减半，保留同种子噪声与帧序，单帧仍失败则明确报错。PiD 保留全幅推理，不以未经验证的空间切块引入接缝。
+
+**PiD 内部分块不是空间切图：** `pixel_chunk_size` 只限制像素 Transformer 中独立 patch 的完整 MLP 支路，attention 仍处理全幅 patch 序列。提前释放 attention 临时张量，避免它们与 MLP 峰值重叠。较小分块可能增加内核调用开销，不应越小越好；本机复测保留 `1024` 作为默认值（`2048` 未见有意义的端到端收益，详见下表）。
+
+**attention_backend（默认 `Kitchen`）：** 通过当前 PiD 的 `ModelPatcher` clone 写入 `transformer_options["optimized_attention_override"]`，只影响本节点这次采样，不修改 ComfyUI 全局 attention。`Kitchen` 使用 Comfy Kitchen int8 attention；本机短片测量延迟较低，但显存占用取决于形状和批次，不能概括为更省。量化与累积舍入会使输出与原始 PyTorch/cuDNN 路径有数值差异，不保证逐像素一致。`cuDNN` 使用 Comfy 已有 `attention_pytorch`，在 CUDA 上以局部 SDPA 上下文优先允许 cuDNN，并保留 MATH 作为不支持形状的兼容回退。当前构建没有 Kitchen 时，选择 `Kitchen` 会记录明确日志并自动切换 `cuDNN`；不会吞掉其他运行时异常。
+
+**同条件短片测量（用于定位取舍，不是所有素材的速度承诺）：**
+
+| 场景 | 设置 | 观测 |
+| --- | --- | --- |
+| PiD 节点，Kitchen | 2 帧、2304×4096、同一模型、4 步、seed=0、batch=2、`pixel_chunk_size=1024` | 13.7346 秒，显存分配 9.72 GiB |
+| PiD 节点，cuDNN | 同上 | 21.1101 秒，显存分配 8.57 GiB |
+| Kitchen 对 cuDNN | 上述同条件 | 延迟降低约 35%，约 1.54×；这是该测量条件的结果，不是通用加速保证 |
+| Kitchen 旧 2 帧视觉对照 | 短片对照 | PSNR 51.6–51.8 dB；不是逐像素相同，长运动质量尚未建立结论 |
+| batch=3 复测 | 6 帧、同一模型与采样设置 | 79.62 秒，分配 12.81 GiB、保留 15.64 GiB；输出与 batch=2 不同，16GB 显卡不推荐 |
+| `pixel_chunk_size` 逆序复测 | 6 帧，2048 对 1024 | 57.82 对 58.09 秒（约 0.46% 差异），6 帧结果相同；因此保留 1024 |
+
+合成 attention 基准曾测得 2.4–2.69×，只反映 attention/内核片段，**不是端到端 PiD 节点提速**。以上结果来自短片和固定参数；分辨率、批次、设备、模型加载状态或素材变化都可能改变耗时和显存，不能据此承诺任意速度提升。Kitchen 与 cuDNN 的输出也不保证逐像素一致；长视频运动质量需要单独检查。
+
+#### 日志与结果边界（FAQ）
+
+- **为什么每个批次都出现 `Model Initialization complete`？** 这是 DynamicVRAM tqdm 首次更新时附带的通用后缀。每批确实会执行准备步骤，但该文字不是磁盘权重每批重新加载的证据。
+- **一次 live cuDNN 记录为什么总耗时较长？** 该次记录总计 249.20 秒，其中 PiD 约 230 秒，后续批次约 17 秒，GPU 利用率 99–100%。它与之前不同长度的任务不能直接比较。
+- **之前的整段任务为什么停滞？** 原因未确定；不要仅凭停滞现象归因于 attention backend。
+- **如何选择 backend？** 默认使用 `Kitchen`；当前构建没有 Kitchen 时本节点记录日志并回退 `cuDNN`。也可以显式选择 `cuDNN`，该覆盖只作用于本节点本次执行，不改全局 attention。
 
 ### 推荐连接
 
@@ -145,7 +171,7 @@ Musefish PiD Batch Video Upscale
   ├── MODEL      ← UNETLoader
   ├── CLIP       ← CLIPLoader(type=pixeldit)
   ├── encode_vae ← VAELoader(Flux\\UltraFlux-v1-vae.safetensors)
-  └── 解码 VAE   ← 代码内固定为 pixel_space
+  └── 像素解码   ← 节点内 float32 映射，无需 VAE
                             │
                             ├── VIDEO → SaveVideo
                             └── IMAGE → 预览或视频合并节点
@@ -165,13 +191,13 @@ ColorMatchToReference ──────────────────→ 
 
 颜色匹配后的结果应从 PiD 的 `IMAGE` 输出进入 `VHS_VideoCombine`；PiD 的 `VIDEO` 输出仍是未经过外部颜色节点的原始视频对象。
 
-`encode_vae` 是唯一需要连接的 VAE 输入。解码端固定使用 ComfyUI 的 `pixel_space` VAE，不需要额外的 VAE 节点。
-
-### PiD 固定输入与交付缩放
+`encode_vae` 是唯一需要连接的 VAE 输入。PiD 直接预测像素空间数据；输出使用 float32 映射，避免旧 `pixel_space` VAE 调度和中间低精度舍入。
 
 | 参数 | 推荐值 |
 | --- | ---: |
 | `batch_size` | `1` 起步；显存足够时提高到 `2` 或 `4` |
+| `pixel_chunk_size` | **1024**；0关闭内部优化，较小值降低MLP激活峰值但可能变慢 |
+| `attention_backend` | **`Kitchen`**；无 Kitchen 时自动记录日志回退 `cuDNN` |
 | `upscale_factor` | `4` |
 | `latent_format` | `flux` |
 | `degrade_sigma` | `0.0` |
@@ -183,7 +209,7 @@ ColorMatchToReference ──────────────────→ 
 
 模型内部始终先将输入帧长边缩放到 `1024`，执行固定的 `1024 → 4096` 超分。`upscale_factor` 只控制最终交付尺寸：设置 `2` 时先得到 4096，再缩小到 2048；设置 `3` 时缩小到 3072；设置 `4` 时直接输出 4096。
 
-输入帧放大到模型尺寸时使用 `lanczos`；输入帧缩小到模型尺寸时使用 `area`；4x 模型结果缩小到 2x/3x 交付尺寸时使用 `area`。
+输入帧放大到模型尺寸时使用浮点 `bicubic`，避免 PIL Lanczos 的 uint8 往返量化；缩小到模型尺寸及2x/3x交付缩放仍使用 `area`。编码前限制到 [0,1]，避免插值过冲。此变更不增加采样步数、不降低1024→4096模型路径分辨率。
 
 模型输入尺寸是内置约束，用户无需设置。
 
@@ -200,7 +226,7 @@ encode_vae:
 Flux\\UltraFlux-v1-vae.safetensors
 
 decode VAE:
-代码内固定为 `pixel_space`，无需连接节点
+不需要：节点直接执行像素空间 float32 映射
 ```
 
 模型下载：
@@ -213,7 +239,7 @@ decode VAE:
 - 先将 `VHS_LoadVideo.frame_load_cap` 设为少量帧验证，例如 `2` 或 `4`。
 - 确认输出尺寸和模型参数正确后，再增加帧数。
 - PiD 超分显存不足时优先降低 `batch_size`，不要改变帧顺序。
-- 后处理节点（Antiflicker / Image Sharpen FS）**无需手动分段**：`frames_per_batch=0` 时按显存自动分批，33 帧 4K 单段直跑也不会 OOM；极端情况可设 `device=cpu` 全 CPU 处理。
+- 后处理支持自动分批与 OOM 缩批重试，但仍需整段 CPU 输入/输出存储，不是无限长视频流式处理；内存不足应在加载端缩短片段。显存紧张先用 `frames_per_batch=1`，或显式 `device=cpu`。
 - 固定模型输入为长边 `1024`，`upscale_factor=2/3/4` 分别交付约 2048/3072/4096 长边结果；模型计算量按 4 倍路径固定。
 - 通过 `VIDEO` 输出连接 `SaveVideo`，由 ComfyUI 统一编码和保存音频。
 
@@ -232,6 +258,7 @@ decode VAE:
 ### 视频相关文件
 
 - `musefish_nodes.py`：PiD 超分、自动分批去频闪、频率分离锐化节点及扩展注册。
+- `pid_runtime.py`：仅对兼容 PiD 像素块启用独立 MLP 分块；全幅 attention 不切图，模型 clone 的临时对象补丁在成功、异常和中断后恢复。
 - [Musefish_PiD_Batch_Video_Upscale.json](workflows/Musefish_PiD_Batch_Video_Upscale.json)：视频超分与后处理模板。
 - 模板 UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`。
 
