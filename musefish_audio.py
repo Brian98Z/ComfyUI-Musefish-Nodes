@@ -36,6 +36,17 @@ _UNIVERSR_MODEL_DIR_NAMES = {"general": "general", "speech": "speech"}
 _UNIVERSR_SAMPLE_RATES = (8000, 12000, 16000, 24000)
 _UNIVERSR_MODES = ["sr", "master", "sr_master", "stem_mix"]
 _UNIVERSR_MODELS = ["general", "speech"]
+# Declared defaults double as the "user has not touched this input" marker: auto_params only
+# rewrites a parameter whose incoming value still equals its default. Shared with the schema so
+# the marker can never drift from the widget default.
+_MODE_AUTO = "auto"
+_MODE_FALLBACK = {"general": "sr_master", "speech": "sr"}
+_STEPS_DEFAULT = 4
+_GUIDANCE_DEFAULT = 1.5
+_DEESS_DEFAULT = True
+# Mirrors ACCEL_MODES in audio_backend/processing.py, where they are applied and measured.
+_ACCEL_MODES = ("fp32", "cuDNN TF32", "bf16")
+_DEFAULT_ACCEL = "cuDNN TF32"
 _UNIVERSR_ODE_METHODS = ["euler", "midpoint", "rk4"]
 
 
@@ -277,6 +288,9 @@ def _universr_execute_audio(
     guidance: float = 1.5,
     chunk_sec: int = 15,
     seed: int = 0,
+    deess: bool = True,
+    auto_params: bool = True,
+    accel: str = _DEFAULT_ACCEL,
     model_cache: str = "",
 ) -> io.NodeOutput:
     if not isinstance(audio, dict) or "waveform" not in audio or "sample_rate" not in audio:
@@ -298,11 +312,13 @@ def _universr_execute_audio(
             raise ValueError(f"Invalid UniverSR input_sr: {input_sr!r}") from exc
         if chosen_rate not in _UNIVERSR_SAMPLE_RATES:
             raise ValueError(f"input_sr must be one of {_UNIVERSR_SAMPLE_RATES} or auto, got {input_sr!r}")
-    if mode not in allowed_modes:
-        raise ValueError(f"Unsupported {node_name} mode: {mode!r}; expected one of {allowed_modes}")
+    if mode != _MODE_AUTO and mode not in allowed_modes:
+        raise ValueError(f"Unsupported {node_name} mode: {mode!r}; expected one of {(_MODE_AUTO, *allowed_modes)}")
     if model not in _UNIVERSR_MODELS:
         raise ValueError(f"Unsupported UniverSR model: {model!r}")
-    if mode != "sr" and model != "general":
+    if accel not in _ACCEL_MODES:
+        raise ValueError(f"Unsupported UniverSR accel: {accel!r}; expected one of {_ACCEL_MODES}")
+    if mode not in (_MODE_AUTO, "sr") and model != "general":
         raise ValueError(f"UniverSR mode {mode!r} requires the general model")
     if ode_method not in _UNIVERSR_ODE_METHODS:
         raise ValueError(f"Unsupported UniverSR ODE method: {ode_method!r}")
@@ -312,7 +328,7 @@ def _universr_execute_audio(
     _universr_release_comfy_models()
     cache_value = str(model_cache or os.environ.get("MUSEFISH_UNIVERSR_MODEL_CACHE", str(_UNIVERSR_MODEL_ROOT))).strip()
     result_batches: list[torch.Tensor] = []
-    logs: list[str] = [f"UniverSR: mode={mode}, model={model}, input_sr={'auto' if auto_input_sr else chosen_rate}, batches={batch_count}"]
+    logs: list[str] = [f"UniverSR: mode={mode}, model={model}, input_sr={'auto' if auto_input_sr else chosen_rate}, accel={accel}, batches={batch_count}"]
     progress_bar = comfy.utils.ProgressBar(batch_count * 100)
     with tempfile.TemporaryDirectory(prefix="musefish_universr_") as temporary:
         scope = Path(temporary)
@@ -324,14 +340,46 @@ def _universr_execute_audio(
             elif effective_channel_mode == "stereo" and current.shape[0] == 1:
                 current = current.repeat(2, 1)
             batch_rate = chosen_rate
+            auto_mode = _MODE_FALLBACK[model] if _MODE_FALLBACK[model] in allowed_modes else allowed_modes[0]
+            batch_mode = auto_mode if mode == _MODE_AUTO else mode
+            batch_steps, batch_guidance, batch_deess = int(ode_steps), float(guidance), bool(deess)
             if auto_input_sr:
                 from .audio_backend.processing import select_input_sample_rate
                 batch_rate, bandwidth_reason = select_input_sample_rate(current.numpy(), source_rate, model_type=model)
                 logs.append(f"batch {index + 1}/{batch_count}: {bandwidth_reason}")
+            if auto_params:
+                from .audio_backend.processing import recommend_processing
+                # A parameter the user moved off its default is an explicit instruction and wins;
+                # only untouched ones (still at the declared default) follow the material.
+                pinned = []
+                if mode != _MODE_AUTO:
+                    pinned.append(f"mode={mode}")
+                if int(ode_steps) != _STEPS_DEFAULT:
+                    pinned.append(f"steps={int(ode_steps)}")
+                if float(guidance) != _GUIDANCE_DEFAULT:
+                    pinned.append(f"guidance={float(guidance):g}")
+                if bool(deess) != _DEESS_DEFAULT:
+                    pinned.append(f"deess={bool(deess)}")
+                try:
+                    matched = recommend_processing(current.numpy(), source_rate, model_type=model)
+                except Exception as exc:      # parameter matching is a convenience, not a gate
+                    logs.append(f"batch {index + 1}/{batch_count}: auto params unavailable ({exc}); keeping node values")
+                else:
+                    if mode == _MODE_AUTO and matched["mode"] in allowed_modes:
+                        batch_mode = matched["mode"]
+                    if int(ode_steps) == _STEPS_DEFAULT:
+                        batch_steps = int(matched["steps"])
+                    if float(guidance) == _GUIDANCE_DEFAULT:
+                        batch_guidance = float(matched["guidance"])
+                    if bool(deess) == _DEESS_DEFAULT:
+                        batch_deess = bool(matched["deess"])
+                    kept = f" · kept node values: {', '.join(pinned)}" if pinned else ""
+                    logs.append(f"batch {index + 1}/{batch_count}: auto params → mode={batch_mode}, "
+                                f"guidance={batch_guidance:g}, steps={batch_steps}, deess={batch_deess}{kept} · {matched['reason']}")
             input_path = scope / f"input_{index:04d}.wav"
             output_path = scope / f"output_{index:04d}.wav"
             _universr_write_wav(input_path, current, source_rate)
-            request = {"input_path": str(input_path), "output_path": str(output_path), "mode": mode, "model": model, "channel_mode": effective_channel_mode, "input_sr": batch_rate, "ode_method": ode_method, "ode_steps": int(ode_steps), "guidance": float(guidance), "chunk_sec": int(chunk_sec), "seed": int(seed), "model_cache": cache_value, "demucs_executable": ""}
+            request = {"input_path": str(input_path), "output_path": str(output_path), "mode": batch_mode, "model": model, "channel_mode": effective_channel_mode, "input_sr": batch_rate, "ode_method": ode_method, "ode_steps": batch_steps, "guidance": batch_guidance, "chunk_sec": int(chunk_sec), "seed": int(seed), "deess": batch_deess, "accel": accel, "model_cache": cache_value, "demucs_executable": ""}
             produced = _universr_run_worker(request, scope, index, batch_count, logs, progress_bar)
             rendered, rendered_rate = _universr_read_wav(produced)
             if rendered_rate != 48000:
@@ -349,7 +397,6 @@ class _MusefishUniverSRAudioBase(io.ComfyNode):
     """Shared schema and worker dispatch for the fixed-model audio nodes."""
 
     _MODEL = "general"
-    _GUIDANCE_DEFAULT = 1.5
     _MODES: tuple[str, ...] = tuple(_UNIVERSR_MODES)
     _NODE_ID = "MusefishUniverSRGeneralAudio"
     _DISPLAY_NAME = "Musefish UniverSR General Audio"
@@ -359,17 +406,49 @@ class _MusefishUniverSRAudioBase(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         inputs = [io.Audio.Input("audio")]
-        if cls._EXPOSE_MODE:
-            inputs.append(io.Combo.Input("mode", options=list(cls._MODES), default="sr"))
+        # Required, and the only required widget input: the frontend renders widget inputs in
+        # input_order.required before optional, so this switch stays the first control on the node.
+        inputs.append(
+            io.Boolean.Input(
+                "auto_params",
+                default=True,
+                tooltip="开启：input_sr / ode_steps / guidance 由素材实测决定，并在界面上隐藏；"
+                        "关闭：这三项按你手动选择的值执行。手动改动过的参数始终优先于自动匹配。",
+            )
+        )
+        # The three inputs the switch governs sit directly below it, so an enabled switch hiding them
+        # is visible at a glance. Every parameter input is optional, so prompts written before they
+        # existed still run on their execute defaults.
         inputs.extend(
             [
-                io.Combo.Input("input_sr", options=["auto", "8000", "12000", "16000", "24000"], default="auto"),
-                io.Combo.Input("channel_mode", options=["auto", "mono", "stereo"], default="auto"),
-                io.Combo.Input("ode_method", options=_UNIVERSR_ODE_METHODS, default="midpoint"),
-                io.Int.Input("ode_steps", default=4, min=1, max=25, step=1),
-                io.Float.Input("guidance", default=cls._GUIDANCE_DEFAULT, min=0.0, max=5.0, step=0.1),
-                io.Int.Input("chunk_sec", default=15, min=1, max=120, step=1),
-                io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, step=1),
+                io.Combo.Input("input_sr", options=["auto", "8000", "12000", "16000", "24000"],
+                               default="auto", optional=True),
+                io.Int.Input("ode_steps", default=_STEPS_DEFAULT, min=1, max=25, step=1, optional=True),
+                io.Float.Input("guidance", default=_GUIDANCE_DEFAULT, min=0.0, max=5.0, step=0.1, optional=True),
+            ]
+        )
+        if cls._EXPOSE_MODE:
+            inputs.append(
+                io.Combo.Input("mode", options=[_MODE_AUTO, *cls._MODES], default=_MODE_AUTO, optional=True)
+            )
+        inputs.extend(
+            [
+                io.Combo.Input("channel_mode", options=["auto", "mono", "stereo"], default="auto", optional=True),
+                io.Combo.Input("ode_method", options=_UNIVERSR_ODE_METHODS, default="midpoint", optional=True),
+                io.Int.Input("chunk_sec", default=15, min=1, max=120, step=1, optional=True),
+                io.Int.Input("seed", default=0, min=0, max=0xFFFFFFFFFFFFFFFF, step=1, optional=True),
+                io.Boolean.Input("deess", default=_DEESS_DEFAULT, optional=True),
+                io.Combo.Input(
+                    "accel",
+                    options=list(_ACCEL_MODES),
+                    default=_DEFAULT_ACCEL,
+                    optional=True,
+                    tooltip="GPU acceleration for the model inference. cuDNN TF32 (default) = 1.18x "
+                            "faster, differences ~ -48 dBFS; fp32 = bit-exact baseline, slowest; "
+                            "bf16 = 1.35x faster but the waveform differs audibly (max ~ -11.7 dB). "
+                            "Attention backends (Flash/Sage/Kitchen) do not apply: this model calls "
+                            "no attention.",
+                ),
                 io.String.Input("model_cache", default="", optional=True, force_input=True),
             ]
         )
@@ -387,14 +466,17 @@ class _MusefishUniverSRAudioBase(io.ComfyNode):
     def execute(
         cls,
         audio: Input.Audio,
-        mode: str = "sr",
+        mode: str = _MODE_AUTO,
         input_sr: str = "auto",
         channel_mode: str = "auto",
         ode_method: str = "midpoint",
-        ode_steps: int = 4,
-        guidance: float = 1.5,
+        ode_steps: int = _STEPS_DEFAULT,
+        guidance: float = _GUIDANCE_DEFAULT,
         chunk_sec: int = 15,
         seed: int = 0,
+        deess: bool = _DEESS_DEFAULT,
+        auto_params: bool = True,
+        accel: str = _DEFAULT_ACCEL,
         model_cache: str = "",
     ) -> io.NodeOutput:
         return _universr_execute_audio(
@@ -410,6 +492,9 @@ class _MusefishUniverSRAudioBase(io.ComfyNode):
             guidance=guidance,
             chunk_sec=chunk_sec,
             seed=seed,
+            deess=deess,
+            auto_params=auto_params,
+            accel=accel,
             model_cache=model_cache,
         )
 
@@ -429,6 +514,5 @@ class MusefishUniverSRSpeechAudio(_MusefishUniverSRAudioBase):
     _MODEL = "speech"
     _MODES = ("sr",)
     _NODE_ID = "MusefishUniverSRSpeechAudio"
-    _GUIDANCE_DEFAULT = 1.5
     _DISPLAY_NAME = "Musefish UniverSR Speech Audio"
     _EXPOSE_MODE = False

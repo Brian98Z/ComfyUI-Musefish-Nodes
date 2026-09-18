@@ -1,6 +1,7 @@
 """Portable four-mode UniverSR processing, independent of Gradio/universr_app."""
 from __future__ import annotations
 import os, random, signal, sys, tempfile, time
+from contextlib import contextmanager
 from math import gcd
 from pathlib import Path
 from typing import Callable
@@ -11,10 +12,49 @@ from . import dsp
 TARGET_SR = 48000
 SUPPORTED_INPUT_SR = (8000, 12000, 16000, 24000)
 MODEL_REPOS = {"general": "woongzip1/universr-audio", "speech": "woongzip1/universr-speech"}
+# Measured on one 9.5 s chunk, 16 ODE steps, RTX 5070 Ti: fp32 is the bit-exact baseline,
+# cuDNN TF32 is 1.18x with a max sample diff of 3.9e-3 (~ -48 dBFS) and is therefore the default,
+# bf16 autocast is 1.35x with a max diff of 0.26 (~ -11.7 dB, opt-in only). fp16 autocast
+# overflowed to NaN, channels_last was 0.69x (slower), cudnn.benchmark was noise, and the model
+# calls no attention at all (0 scaled_dot_product_attention calls per enhance), so the attention
+# backends ComfyUI exposes cannot accelerate this model.
+ACCEL_MODES = ("fp32", "cuDNN TF32", "bf16")
+DEFAULT_ACCEL = "cuDNN TF32"
+FALLBACK_ACCEL = "fp32"
 Progress = Callable[[int, str], None]
 _MODEL_CACHE: dict[tuple[str, str], object] = {}
 
 def _noop_progress(percent: int, message: str) -> None: pass
+
+def resolve_accel(name: str) -> str:
+    """Validate the acceleration choice and drop what this machine cannot run."""
+    mode = str(name or DEFAULT_ACCEL)
+    if mode not in ACCEL_MODES:
+        raise ValueError(f"unknown accel {mode!r}; choose one of {ACCEL_MODES}")
+    import torch
+    if mode != FALLBACK_ACCEL and not torch.cuda.is_available():
+        print(f"accel {mode!r} needs CUDA; using {FALLBACK_ACCEL}", file=sys.stderr, flush=True)
+        return FALLBACK_ACCEL
+    return mode
+
+
+@contextmanager
+def accel_context(mode: str):
+    """Apply the acceleration setting for the duration of the block, then restore it."""
+    import torch
+    if mode == "cuDNN TF32":
+        previous = (torch.backends.cudnn.allow_tf32, torch.backends.cuda.matmul.allow_tf32)
+        torch.backends.cudnn.allow_tf32 = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        try:
+            yield mode
+        finally:
+            torch.backends.cudnn.allow_tf32, torch.backends.cuda.matmul.allow_tf32 = previous
+    elif mode == "bf16":
+        with torch.autocast("cuda", dtype=torch.bfloat16):
+            yield mode
+    else:
+        yield mode
 
 def _seed_everything(seed: int) -> None:
     random.seed(int(seed)); np.random.seed(int(seed) & 0xffffffff)
@@ -43,7 +83,10 @@ def _configure_environment(request: dict) -> Path:
 
 def _model_directory(cache: Path, model_type: str) -> Path | None:
     name = "universr-audio" if model_type == "general" else "universr-speech"
-    candidates = (cache, cache / name, cache / f"models--woongzip1--{name}", cache / "huggingface" / f"models--woongzip1--{name}")
+    # "general"/"speech" are the directory names MusefishUniverSRModel writes, so a cache
+    # root holding both of them serves sr and stem_mix (which needs both models at once).
+    candidates = (cache, cache / name, cache / model_type, cache / f"models--woongzip1--{name}",
+                  cache / "huggingface" / name, cache / "huggingface" / f"models--woongzip1--{name}")
     for candidate in candidates:
         if (candidate / "config.yaml").is_file() and (candidate / "pytorch_model.bin").is_file(): return candidate
         snapshots = candidate / "snapshots"
@@ -75,7 +118,7 @@ def _resample_stereo(x: np.ndarray, orig_sr: int, new_sr: int = TARGET_SR) -> np
     if int(orig_sr) == int(new_sr): return x.astype(np.float64, copy=True)
     channels = [_resample(x[:, c], orig_sr, new_sr) for c in range(x.shape[1])]; n = min(map(len, channels))
     return np.stack([c[:n] for c in channels], axis=1)
-def _bandwidth_analysis(waveform: np.ndarray, sample_rate: int) -> tuple[float, str, np.ndarray, np.ndarray, np.ndarray, float]:
+def _bandwidth_analysis(waveform: np.ndarray, sample_rate: int) -> tuple[float, str, np.ndarray, np.ndarray, np.ndarray, float, float]:
     """Return robust bandwidth facts and the already-computed frame spectra."""
     values = np.asarray(waveform, dtype=np.float64)
     if values.ndim == 2:
@@ -93,7 +136,7 @@ def _bandwidth_analysis(waveform: np.ndarray, sample_rate: int) -> tuple[float, 
     peak = float(np.max(np.abs(values)))
     if peak <= 1e-8:
         empty = np.empty((0, 0), dtype=np.float64)
-        return 0.0, "silent/near-silent waveform", empty, empty, empty, 0.0
+        return 0.0, "silent/near-silent waveform", empty, empty, empty, 0.0, 0.0
 
     n_fft = min(4096, 1 << max(8, int(np.floor(np.log2(max(256, values.size))))) )
     hop = max(n_fft // 2, 1)
@@ -113,7 +156,7 @@ def _bandwidth_analysis(waveform: np.ndarray, sample_rate: int) -> tuple[float, 
     freqs = freqs[valid]
     spectrum_frames = np.maximum(spectrum_frames[:, valid], 1e-20)
     if power.size < 4:
-        return sr / 2.0, "short waveform; using available Nyquist", freqs, spectrum_frames, power, 0.0
+        return sr / 2.0, "short waveform; using available Nyquist", freqs, spectrum_frames, power, 0.0, sr / 2.0
 
     # Smooth at roughly 100 Hz, then estimate a robust broadband noise floor.
     smooth_bins = max(1, int(round(100.0 * n_fft / sr)))
@@ -128,7 +171,7 @@ def _bandwidth_analysis(waveform: np.ndarray, sample_rate: int) -> tuple[float, 
     excess = np.where(significant, np.maximum(power_smooth - 10 ** ((noise_db + 6.0) / 10.0), 0.0), 0.0)
     total = float(excess.sum())
     if total <= 1e-18:
-        return 0.0, f"no spectrum >10 dB above noise floor ({noise_db:.1f} dB)", freqs, spectrum_frames, power_smooth, noise_db
+        return 0.0, f"no spectrum >10 dB above noise floor ({noise_db:.1f} dB)", freqs, spectrum_frames, power_smooth, noise_db, 0.0
     cumulative = np.cumsum(excess)
     rolloff_index = int(np.searchsorted(cumulative, total * 0.99))
     cutoff = float(freqs[min(rolloff_index, len(freqs) - 1)])
@@ -137,12 +180,26 @@ def _bandwidth_analysis(waveform: np.ndarray, sample_rate: int) -> tuple[float, 
     tail = excess[freqs >= max(0.0, cutoff - band_width)]
     if tail.size and float(tail.sum()) < total * 0.005:
         cutoff = float(freqs[max(0, rolloff_index - max(1, int(band_width * n_fft / sr)))])
-    return cutoff, f"99% spectral rolloff {cutoff:.0f} Hz; noise floor {noise_db:.1f} dB", freqs, spectrum_frames, power_smooth, noise_db
+    # Content cutoff: the first frequency past the rolloff where the spectrum drops more
+    # than 20 dB below the rolloff level.  An mp3 can roll off near 9.6 kHz while carrying
+    # usable content to ~15 kHz through a noisy extension; tiering on the rolloff alone
+    # picks the 24k tier and has the model generate 8-12 kHz that was already there.
+    rolloff_db = 10.0 * np.log10(power_smooth[min(rolloff_index, len(power_smooth) - 1)] + 1e-20)
+    content_cutoff = cutoff
+    for index in range(rolloff_index, len(freqs)):
+        if 10.0 * np.log10(power_smooth[index] + 1e-20) < rolloff_db - 20.0:
+            content_cutoff = float(freqs[index])
+            break
+    else:
+        content_cutoff = float(freqs[-1])
+    return (cutoff, f"99% spectral rolloff {cutoff:.0f} Hz; noise floor {noise_db:.1f} dB; "
+                    f"content cutoff {content_cutoff:.0f} Hz",
+            freqs, spectrum_frames, power_smooth, noise_db, content_cutoff)
 
 
 def estimate_effective_bandwidth(waveform: np.ndarray, sample_rate: int) -> tuple[float, str]:
     """Estimate decoded waveform bandwidth using robust Welch-style spectra."""
-    cutoff, reason, _, _, _, _ = _bandwidth_analysis(waveform, sample_rate)
+    cutoff, reason, _, _, _, _, _ = _bandwidth_analysis(waveform, sample_rate)
     return cutoff, reason
 
 
@@ -192,21 +249,39 @@ def _persistent_high_band_evidence(
 
 
 def select_input_sample_rate(waveform: np.ndarray, sample_rate: int, model_type: str = "general") -> tuple[int, str]:
-    """Map effective bandwidth to a supported rate, correcting general auto upward."""
-    cutoff, reason, freqs, spectrum_frames, power_smooth, noise_db = _bandwidth_analysis(waveform, sample_rate)
-    if cutoff <= 3600.0:
+    """Map effective bandwidth to a supported rate, correcting general auto upward.
+
+    Tiering uses ``content_cutoff`` (the highest frequency still within 20 dB of the
+    rolloff level) rather than the 99% rolloff: an mp3 rolls off near 9.6 kHz while its
+    content runs to ~15 kHz, and a rolloff-only tier would pick 24k and have the model
+    generate 8-12 kHz that was already present.
+    """
+    cutoff, reason, freqs, spectrum_frames, power_smooth, noise_db, content_cutoff = _bandwidth_analysis(waveform, sample_rate)
+    effective = max(cutoff, content_cutoff)
+    if effective <= 5400.0:
+        # 8k→48k is 70% of the model's training batches and its strongest condition, so
+        # anything at or below the 8k tier's own visible band (4 kHz) stays there; the
+        # 5000-5400 Hz edge band trials 8k and relies on the upward correction below if
+        # the band really carries sustained high-frequency content.
         base = 8000
-    elif cutoff <= 5400.0:
-        base = 12000
-    elif cutoff <= 7200.0:
+    elif effective <= 7200.0:
         base = 16000
+    elif effective <= 12000.0:
+        base = 16000   # content to 12k: the 16k condition cleans up without inventing sibilance
     else:
         base = 24000
+
     if model_type != "general" or not spectrum_frames.size:
         suffix = " (high-frequency correction disabled for non-general model)" if model_type != "general" else ""
-        return base, f"auto input_sr={base} from effective cutoff {cutoff:.0f} Hz ({reason}){suffix}"
-
+        return base, (f"auto input_sr={base} from effective cutoff {effective:.0f} Hz "
+                      f"(rolloff {cutoff:.0f}, content {content_cutoff:.0f}; {reason}){suffix}")
     source_nyquist = float(int(sample_rate)) / 2.0
+    # 8k hard floor: at or below 5000 Hz return the base tier without the upward correction.
+    # The correction window (4150-5850 Hz) counts filter transition energy as "sustained
+    # high-frequency evidence" and promoted every measured 3400-5000 Hz source to 12k/16k.
+    if effective <= 5000.0:
+        return base, (f"auto input_sr={base} (base {base}; upward correction skipped for effective "
+                      f"{effective:.0f} Hz <= 5000 Hz; {reason})")
     corrected = base
     evidence = ""
     total_power = float(np.sum(power_smooth))
@@ -226,6 +301,93 @@ def select_input_sample_rate(waveform: np.ndarray, sample_rate: int, model_type:
     if corrected > base:
         return corrected, f"auto input_sr={corrected} (base {base}; corrected {corrected}; persistent high-frequency evidence: {evidence}; {reason})"
     return base, f"auto input_sr={base} (base {base}; no upward correction: no persistent contiguous high-frequency band; {reason})"
+
+
+# ── Material-driven parameter matching (2026-09-18 cross-material measurements) ──────────
+# Four materials x four configurations at a fixed seed, each scored against its own
+# full-band reference: guidance is the "restore highs vs invent them" knob (16-20k
+# overgeneration climbs monotonically, +8.6 → +17.5 dB) and its best value moves with how
+# much high band the source is missing.  These rules hang the same measurement
+# (content_cutoff + band falls) onto mode/guidance/steps/de-esser:
+#     restoration need = clip((-23 - d12) / 20, 0, 1),  d12 = B(12-16k) - B(4-6k)
+# Measured: full mixes -13.6 / -13.5 / -8.4 dB → need 0 (SR would only add hiss);
+# vocals -29.6 → 0.33; low-bandwidth -39.0 → 0.80 (genuine restoration).
+FULL_BAND_D12_DB = -23.0        # d12 above this = the source already carries the top band
+RESTORATION_SPAN_DB = 20.0      # -23 … -43 dB spans "nothing to fix" … "heavy restoration"
+REFERENCE_BAND_HZ = (4000.0, 6000.0)   # band every level is referenced against
+SPEECH_GUIDANCE_LO, SPEECH_GUIDANCE_HI = 1.0, 1.5
+GENERAL_GUIDANCE = 2.0          # music range was fixed by listening, not re-measured here
+SIBILANCE_D6_DB = 2.0           # 6-8k must exceed 4-6k; real sibilance measures -1.7…-2.5
+STEPS_SPEECH_FAST, STEPS_SPEECH_RESTORE = 8, 16
+STEPS_BY_MODEL = {"speech": STEPS_SPEECH_FAST, "general": 16}
+NEED_FOR_QUALITY_STEPS = 0.5
+
+
+def _band_level_db(freqs: np.ndarray, power: np.ndarray, lower_hz: float, upper_hz: float) -> float | None:
+    band = (freqs >= float(lower_hz)) & (freqs < float(upper_hz))
+    if not band.any():
+        return None
+    return float(10.0 * np.log10(float(np.mean(power[band])) + 1e-20))
+
+
+def recommend_processing(waveform: np.ndarray, sample_rate: int, model_type: str = "general") -> dict:
+    """Match mode / guidance / steps / de-esser to what the material itself measures.
+
+    Shares ``_bandwidth_analysis`` with ``select_input_sample_rate``.  Returns
+    ``{"mode", "guidance", "steps", "deess", "metrics", "reason"}``; ``mode`` uses the same
+    keys as the node's ``mode`` input ("sr"/"master"/"sr_master").  The speech model only
+    offers super-resolution, so a full-bandwidth speech input still reports "sr" and the
+    reason says the material needs no enhancement.  Unreadable or near-silent material
+    falls back to the per-model defaults.
+    """
+    model = "speech" if str(model_type).lower() == "speech" else "general"
+    fallback = {
+        "mode": "sr" if model == "speech" else "sr_master",
+        "guidance": SPEECH_GUIDANCE_HI if model == "speech" else GENERAL_GUIDANCE,
+        "steps": STEPS_BY_MODEL[model],
+        "deess": model == "general",
+        "metrics": {},
+        "reason": "material unreadable (silent/too short) — keeping per-model defaults",
+    }
+    try:
+        _, _, freqs, _, power, _, content_cutoff = _bandwidth_analysis(waveform, sample_rate)
+    except (ValueError, TypeError, FloatingPointError):
+        return fallback
+    if freqs.size < 4 or power.size < 4 or not np.isfinite(power).all() or float(np.max(power)) <= 1e-20:
+        return fallback
+    reference = _band_level_db(freqs, power, *REFERENCE_BAND_HZ)
+    if reference is None:
+        return fallback
+    levels = {name: _band_level_db(freqs, power, low, high) for name, low, high in (
+        ("d6", 6000.0, 8000.0), ("d8", 8000.0, 12000.0),
+        ("d12", 12000.0, 16000.0), ("d16", 16000.0, 20000.0))}
+    visible = {name: (None if value is None else round(value - reference, 1)) for name, value in levels.items()}
+    if visible["d12"] is None or float(freqs[-1]) < 16000.0:
+        need = 1.0
+        basis = f"container band stops below 16k (visible to {freqs[-1] / 1000:.1f}k)"
+    else:
+        need = float(np.clip((FULL_BAND_D12_DB - visible["d12"]) / RESTORATION_SPAN_DB, 0.0, 1.0))
+        basis = (f"12-16k sits {visible['d12']:+.1f} dB below 4-6k (full-band threshold "
+                 f"{FULL_BAND_D12_DB:.0f}) → restoration need {need * 100:.0f}%")
+    if need <= 0.0:
+        mode = "sr" if model == "speech" else "master"
+    else:
+        mode = "sr" if model == "speech" else "sr_master"
+    if model == "speech":
+        guidance = SPEECH_GUIDANCE_LO if need < 0.5 else SPEECH_GUIDANCE_HI
+        steps = STEPS_SPEECH_RESTORE if need >= NEED_FOR_QUALITY_STEPS else STEPS_SPEECH_FAST
+        deess = visible["d6"] is not None and visible["d6"] >= SIBILANCE_D6_DB
+    else:
+        guidance = GENERAL_GUIDANCE
+        steps = STEPS_BY_MODEL["general"]
+        deess = True
+    mode_name = {"sr": "sr", "master": "master", "sr_master": "sr_master"}[mode]
+    bands = " / ".join(f"{name} {value:+.1f}" for name, value in visible.items() if value is not None)
+    reason = (f"{basis} · content cutoff {content_cutoff:.0f} Hz · {bands} dB rel 4-6k · "
+              f"mode={mode_name} · guidance={guidance:g} · steps={steps} · deess={deess}")
+    return {"mode": mode, "guidance": guidance, "steps": steps, "deess": deess,
+            "metrics": {"content_cutoff": content_cutoff, "need": round(need, 3), **visible},
+            "reason": reason}
 
 
 def _bandlimit(signal_1d: np.ndarray, effective_sr: int) -> np.ndarray:
@@ -265,11 +427,17 @@ def _sr_mid_chunks(model, mid48: np.ndarray, input_sr: int, request: dict, temp_
     gain = np.sqrt(np.mean(mid48 * mid48) + 1e-12) / (np.sqrt(np.mean(result * result)) + 1e-12)
     return result * np.clip(gain, .5, 2.)
 
-def _sr_render(model, source48: np.ndarray, input_sr: int, request: dict, temp_dir: Path, progress: Progress, p0: int, p1: int, cancel: Callable[[], bool], stereo: bool) -> np.ndarray:
+def _sr_render(model, source48: np.ndarray, input_sr: int, request: dict, temp_dir: Path, progress: Progress, p0: int, p1: int, cancel: Callable[[], bool], stereo: bool, master_mid: bool = False) -> np.ndarray:
     if source48.ndim == 1: source48 = source48[:, None]
     mid = _sr_mid_chunks(model, _bandlimit(source48.mean(axis=1), input_sr), input_sr, request, temp_dir, progress, p0, p1, cancel)
+    if master_mid:
+        # The V8 chain runs on the mid alone.  4 dB of true-peak headroom is reserved: the
+        # +6 dB side excitation plus the M/S sum can push L/R back over a ceiling the mid
+        # already met on its own.  The de-esser rides inside the chain (as in the app).
+        mid = dsp.master_chain(np.stack([mid, mid], axis=1), peak_headroom_db=4.0, vocal_gentle=True).mean(axis=1)
     if not stereo: return mid[:, None]
     side = source48[:, 0] - source48[:, 1] if source48.shape[1] >= 2 else np.zeros(len(source48)); side = _bandlimit(side, input_sr)
+    side = dsp.decorrelate_side_hf(side, mid)
     from scipy.signal import butter, sosfiltfilt
     side += sosfiltfilt(butter(2, 6000, btype="high", fs=TARGET_SR, output="sos"), side) * (10 ** (6. / 20) - 1)
     n = min(len(mid), len(side)); return np.stack([mid[:n] + side[:n] / 2, mid[:n] - side[:n] / 2], axis=1)
@@ -321,6 +489,12 @@ def _read_audio(path: Path) -> tuple[np.ndarray, int]:
     if not np.isfinite(data).all(): raise ValueError("input audio contains non-finite samples")
     return data, int(rate)
 
+def _fit_headroom(data: np.ndarray) -> np.ndarray:
+    """Scale an over-range render down instead of hard-clipping its samples."""
+    arr = np.asarray(data, dtype=np.float64)
+    peak = float(np.max(np.abs(arr))) if arr.size else 0.0
+    return arr * (1.0 / peak) if np.isfinite(peak) and peak > 1.0 else arr
+
 def _write_audio(path: Path, data: np.ndarray) -> None:
     path.parent.mkdir(parents=True, exist_ok=True); arr = np.asarray(data, dtype=np.float64)
     if not np.isfinite(arr).all(): raise ValueError("rendered audio contains non-finite samples")
@@ -348,6 +522,7 @@ def process_request(request: dict, progress: Progress = _noop_progress, cancel: 
         if input_sr not in SUPPORTED_INPUT_SR: raise ValueError(f"input_sr must be one of {SUPPORTED_INPUT_SR}")
     model_type = str(request.get("model", "general"))
     if model_type not in MODEL_REPOS: raise ValueError("model must be general or speech")
+    deess = bool(request.get("deess", True))
     if mode != "sr" and model_type != "general": raise ValueError("master and stem_mix require general model")
     source, source_sr = _read_audio(Path(str(request["input_path"])).expanduser()); source48 = _resample_stereo(source, source_sr)
     progress(3, f"prepared decoded audio ({source_sr} Hz container, {len(source) / source_sr:.2f}s)")
@@ -355,8 +530,12 @@ def process_request(request: dict, progress: Progress = _noop_progress, cancel: 
         input_sr, bandwidth_reason = select_input_sample_rate(source, source_sr, model_type=model_type)
         progress(4, bandwidth_reason)
     stereo = str(request.get("channel_mode", "stereo")).lower() in {"stereo", "ms", "stereo (立体声)"}
+    accel = resolve_accel(request.get("accel", DEFAULT_ACCEL))
     _seed_everything(int(request.get("seed", 0))); cache = _configure_environment(request)
-    with tempfile.TemporaryDirectory(prefix="musefish_universr_") as temp_name:
+    if accel != FALLBACK_ACCEL:
+        progress(5, f"accel {accel}" if mode != "master"
+                 else f"accel {accel} unused: master mode runs no model inference")
+    with accel_context(accel), tempfile.TemporaryDirectory(prefix="musefish_universr_") as temp_name:
         temp_dir = Path(temp_name)
         if mode == "master":
             progress(10, "running V8 mastering chain"); rendered = dsp.master_chain(source48)
@@ -368,22 +547,60 @@ def process_request(request: dict, progress: Progress = _noop_progress, cancel: 
             vocal_path, instrumental_path = _demucs_two_stems(stem_input, temp_dir / "demucs", request, progress, cancel)
             vocal, vocal_sr = _read_audio(vocal_path); instrumental, instrumental_sr = _read_audio(instrumental_path)
             vocal48, instrumental48 = _resample_stereo(vocal, vocal_sr), _resample_stereo(instrumental, instrumental_sr)
-            vocal_out = dsp.brighten(_sr_stem(speech, vocal48, input_sr, request, temp_dir, progress, 25, 52, cancel), 1.5)
+            # Vocals: speech SR → denoise gate → 8-12k and 12-16k restored toward the stem,
+            # brightened at 1.0 dB (1.5 rang), then peak-shaved 1.5 dB — demucs vocal crest
+            # is 21-22 dB, so shaving makes the voice sit forward instead of spiking.
+            vocal_out = _sr_stem(speech, vocal48, input_sr, request, temp_dir, progress, 25, 52, cancel)
+            vocal_out = dsp.band_match(vocal_out, vocal48, 8000.0, 12000.0, 12.0)
+            vocal_out = dsp.band_match(vocal_out, vocal48, 12000.0, 16000.0, 5.0)
+            vocal_out = dsp.brighten(vocal_out, 1.0)
+            vocal_tp = dsp.true_peak_db(vocal_out, TARGET_SR)
+            vocal_out = dsp.soft_limit(vocal_out, 10 ** ((vocal_tp - 1.5) / 20))
+            # Instrumental: general SR → V8 master → 12-16k restored.
             instrumental_out = dsp.master_chain(_sr_stem(general, instrumental48, input_sr, request, temp_dir, progress, 54, 80, cancel))
-            rv0 = np.sqrt(np.mean(vocal48 * vocal48) + 1e-12); ri0 = np.sqrt(np.mean(instrumental48 * instrumental48) + 1e-12); rv = np.sqrt(np.mean(vocal_out * vocal_out) + 1e-12); ri = np.sqrt(np.mean(instrumental_out * instrumental_out) + 1e-12)
-            rel_db = 20 * np.log10(rv0 / ri0 + 1e-12) + 2.; gain = 10 ** (rel_db / 20) * ri / max(rv, 1e-12); n = min(len(vocal_out), len(instrumental_out)); rendered = vocal_out[:n] * gain + instrumental_out[:n]
-            peak = float(np.max(np.abs(rendered))) if rendered.size else 0.;
-            if peak > 10 ** (-.3 / 20): rendered *= 10 ** (-.3 / 20) / peak
+            instrumental_out = dsp.band_match(instrumental_out, instrumental48, 12000.0, 16000.0, 5.0)
+            rv0 = np.sqrt(np.mean(vocal48 * vocal48) + 1e-12); ri0 = np.sqrt(np.mean(instrumental48 * instrumental48) + 1e-12)
+            rv = np.sqrt(np.mean(vocal_out * vocal_out) + 1e-12); ri = np.sqrt(np.mean(instrumental_out * instrumental_out) + 1e-12)
+            rel_db = 20 * np.log10(rv0 / ri0 + 1e-12) + 2.; gain = 10 ** (rel_db / 20) * ri / max(rv, 1e-12)
+            n = min(len(vocal_out), len(instrumental_out)); rendered = vocal_out[:n] * gain + instrumental_out[:n]
+            # Anchor to the source's own loudness (the two stems' sum is 1.5-3 dB off the
+            # original, so anchoring to the stems was dragging the whole mix down), then
+            # close on true peak with limit-then-restore rounds: what the limiter eats is
+            # gained back, so the mix keeps its loudness instead of losing it to a trim.
+            reference_lufs = dsp.lufs_gated(source48, TARGET_SR)
+            goal_lufs = float(np.clip(reference_lufs, -23.0, -18.0)) if np.isfinite(reference_lufs) else -18.0
+            rendered *= 10 ** (float(np.clip(goal_lufs - dsp.lufs_gated(rendered, TARGET_SR), -3.0, 3.0)) / 20)
+            for _ in range(4 if dsp.true_peak_db(rendered, TARGET_SR) > -1.0 else 0):
+                rendered = dsp.soft_limit_tp2(rendered, 10 ** (-1.0 / 20), TARGET_SR, release_ms=50.0)
+                back_db = float(np.clip(goal_lufs - dsp.lufs_gated(rendered, TARGET_SR), 0.0, 3.0))
+                if back_db > 0.05: rendered *= 10 ** (back_db / 20)
+                if dsp.true_peak_db(rendered, TARGET_SR) <= -1.0: break
             if not stereo: rendered = rendered.mean(axis=1, keepdims=True)
-            progress(94, f"mixed stems; vocal lift {rel_db:+.1f} dB")
+            progress(94, f"mixed stems; vocal lift {rel_db:+.1f} dB, loudness {dsp.lufs_gated(rendered, TARGET_SR):.1f} LUFS")
         else:
-            model = _load_model(model_type, cache); enhanced = _sr_render(model, source48, input_sr, request, temp_dir, progress, 20, 88, cancel, stereo)
-            if mode == "sr_master":
-                progress(90, "running V8 mastering chain on enhanced mid")
-                if enhanced.shape[1] == 2:
-                    side = enhanced[:, 0] - enhanced[:, 1]; mid = dsp.master_chain(np.stack([enhanced.mean(axis=1)] * 2, axis=1)).mean(axis=1); enhanced = np.stack([mid + side / 2, mid - side / 2], axis=1)
-                else: enhanced = dsp.master_chain(np.stack([enhanced[:, 0]] * 2, axis=1))[:, :1]
+            model = _load_model(model_type, cache)
+            enhanced = _sr_render(model, source48, input_sr, request, temp_dir, progress, 20, 88, cancel, stereo, master_mid=(mode == "sr_master"))
             rendered = dsp.clean_sr_output(enhanced, source_sr, input_sr)
+            # Band-split de-esser on the raw SR output: 16 steps at guidance 2.0 measured a
+            # +8.4 dB sibilance band while 12-16k/16-20k stayed intact (Δ0.0 dB).  General
+            # only — the speech model's sibilance already sits below the source, and cutting
+            # it there removes 12.7 dB of real detail.  sr_master runs its own in-chain one.
+            if deess and mode == "sr" and model_type == "general":
+                rendered = dsp.de_esser(rendered, TARGET_SR, max_cut_db=8.0)
+                progress(92, "de-esser: band-split 5.5-8.5k applied")
+            rendered = _fit_headroom(rendered)
+            true_peak = dsp.true_peak_db(rendered, TARGET_SR)
+            if true_peak > -1.05:
+                # sr_master arrives here after a loudness-carrying master, so shave the peaks
+                # (gain riding, no new harmonics) before falling back to a linear trim; a
+                # full trim would throw away the ~1.5 dB of loudness the peaks cost.
+                if mode == "sr_master":
+                    rendered = dsp.soft_limit(rendered, 10 ** (-1.05 / 20))
+                    residual = dsp.true_peak_db(rendered, TARGET_SR)
+                    if residual > -1.05: rendered *= 10 ** ((-1.05 - residual) / 20)
+                else:
+                    rendered *= 10 ** ((-1.05 - true_peak) / 20)
+                progress(93, f"true peak {true_peak:.2f} dBTP → {dsp.true_peak_db(rendered, TARGET_SR):.2f} dBTP")
             if not stereo: rendered = rendered.mean(axis=1, keepdims=True)
             progress(94, "super-resolution complete")
         _write_audio(Path(str(request["output_path"])).expanduser(), rendered)
