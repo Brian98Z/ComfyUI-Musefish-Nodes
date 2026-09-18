@@ -390,10 +390,6 @@ MusefishUniverSRModel（speech）── model_cache ─→ ↑
 | `fp32` | — | — | 与既有听感锁定版本**逐样本一致**，需要复现基准时选它 |
 | `cuDNN TF32` | **1.18×** | 3.9e-3（≈ −48 dBFS） | **默认档** |
 | `bf16` | 1.35× | 0.26（≈ −11.7 dB，rms −38.6 dB） | 已提供，但有可闻精度损失 |
-| `fp16` | 1.34× | NaN（溢出） | **不放**：输出不可用 |
-| `channels_last` | 0.69×（更慢） | — | **不放**：无加速效果 |
-| `cudnn.benchmark` | 噪声级 | 0 | **不放**：无稳定效果，且算法自选会让输出不可复现 |
-| `Kitchen` / `Flash` / `Sage` / cuDNN-attention | 无 | 0 | **不放**：UniverSR 是无 attention 层的 ConvNeXt 式网络，这些注意力后端没有作用对象（它们只对含 attention 的模型，如视频节点的 PiT 块有效） |
 
 无 CUDA 的机器上任何非 `fp32` 档都会自动退回 `fp32`；该设置只影响本节点的模型推理，不改动 ComfyUI 的全局 GPU 配置。
 
