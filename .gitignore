@@ -1,2 +1,7 @@
 __pycache__/
 *.py[cod]
+
+# NVIDIA proprietary runtime DLLs (from D:\DLSS5Tool\_internal) — not
+# redistributable; see DLSS5_README.md for manual setup.
+dlss5_backend/dlls/*.dll
+dlss5_backend/logs/

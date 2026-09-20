@@ -22,6 +22,7 @@ import node_helpers
 from comfy_api.latest import ComfyExtension, Input, InputImpl, Types, io
 from typing_extensions import override
 from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel, MusefishUniverSRSpeechAudio
+from .musefish_dlss5 import MusefishDLSS5NeuralRender
 from .pid_runtime import (
     DEFAULT_ATTENTION_BACKEND,
     ATTENTION_BACKENDS,
@@ -856,7 +857,7 @@ class AutoBatchImageSharpenFS(io.ComfyNode):
 class MusefishExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS, MusefishUniverSRModel, MusefishUniverSRGeneralAudio, MusefishUniverSRSpeechAudio]
+        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS, MusefishUniverSRModel, MusefishUniverSRGeneralAudio, MusefishUniverSRSpeechAudio, MusefishDLSS5NeuralRender]
 
 
 async def comfy_entrypoint() -> MusefishExtension:

@@ -1,6 +1,7 @@
 """Musefish PiD video and UniverSR audio nodes."""
 
 from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel, MusefishUniverSRSpeechAudio
+from .musefish_dlss5 import MusefishDLSS5NeuralRender
 from .musefish_nodes import (
     AutoBatchAntiflicker,
     AutoBatchImageSharpenFS,
@@ -21,4 +22,5 @@ __all__ = [
     "MusefishUniverSRSpeechAudio",
     "AutoBatchAntiflicker",
     "AutoBatchImageSharpenFS",
+    "MusefishDLSS5NeuralRender",
 ]

@@ -260,6 +260,28 @@ decode VAE:
 - [Musefish_PiD_Batch_Video_Upscale.json](workflows/Musefish_PiD_Batch_Video_Upscale.json)：视频超分与后处理模板。
 - 模板 UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`。
 
+## DLSS5 超分节点
+
+> **仅支持 NVIDIA RTX 50 系（Blackwell）显卡**：DLSS 5 超分与配套
+> RTX 视频超分运行库为 Blackwell 独占，40 系及更早显卡无法创建该 Feature。
+
+### 功能概览
+
+- **图像超分、视频超分均可使用**：输入为标准 IMAGE 批次（单图、图组、
+  VHS 解出的视频帧序列均可），输出保持批次结构直接接 SaveImage /
+  VHS_VideoCombine。
+- `musefish_dlss5.py` + `dlss5_backend/`：把 DLSS5Tool 的 DLSS 5 超分
+  （NGX Feature 18）与 RTX 视频超分封装为 `MusefishDLSS5NeuralRender`
+  节点（分类 `Musefish/Video`），在隔离子进程里驱动 NVIDIA DLL，崩溃
+  不影响 ComfyUI 主进程；详见 [DLSS5_README.md](DLSS5_README.md)。
+- 案例效果：[assets/DLSS5超分案例.mp4](assets/DLSS5超分案例.mp4)
+  （1472×1280@24fps，10 秒，2× RTX VSR + Feature 18 实测输出）。
+- [Musefish_DLSS5_Test.json](workflows/Musefish_DLSS5_Test.json)：图片
+  增强最小链路（LoadImage → DLSS5 → SaveImage）。
+- [Musefish_DLSS5_Video_Segments.json](workflows/Musefish_DLSS5_Video_Segments.json)：
+  长视频分段增强案例（LoadVideoFFmpegPath 分段 → DLSS5 → VideoCombine，
+  音频直通、帧率自动取源；`keep_session=auto` 复用热 worker）。
+
 ## 音频超分处理
 
 ### 功能概览

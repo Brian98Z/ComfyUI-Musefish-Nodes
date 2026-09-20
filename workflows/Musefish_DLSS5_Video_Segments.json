@@ -1,0 +1,386 @@
+{
+  "id": "9f2a1c30-dlss5-seg-0001",
+  "revision": 0,
+  "last_node_id": 4,
+  "last_link_id": 5,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "VHS_LoadVideoFFmpegPath",
+      "pos": [
+        80,
+        200
+      ],
+      "size": [
+        360,
+        220
+      ],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": null
+        },
+        {
+          "name": "format",
+          "type": "COMBO",
+          "link": null
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            1
+          ]
+        },
+        {
+          "name": "mask",
+          "type": "MASK",
+          "links": null
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "links": [
+            3
+          ]
+        },
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "links": [
+            2
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_LoadVideoFFmpegPath"
+      },
+      "widgets_values": [
+        "H:\\input\\video-1.mp4",
+        0,
+        0,
+        100,
+        0
+      ]
+    },
+    {
+      "id": 2,
+      "type": "VHS_VideoInfoSource",
+      "pos": [
+        500,
+        460
+      ],
+      "size": [
+        300,
+        160
+      ],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "video_info",
+          "type": "VHS_VIDEOINFO",
+          "link": 2
+        }
+      ],
+      "outputs": [
+        {
+          "name": "fps🟨",
+          "type": "FLOAT",
+          "links": [
+            4
+          ]
+        },
+        {
+          "name": "frame_count🟨",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "duration🟨",
+          "type": "FLOAT",
+          "links": null
+        },
+        {
+          "name": "width🟨",
+          "type": "INT",
+          "links": null
+        },
+        {
+          "name": "height🟨",
+          "type": "INT",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoInfoSource"
+      }
+    },
+    {
+      "id": 3,
+      "type": "MusefishDLSS5NeuralRender",
+      "pos": [
+        500,
+        200
+      ],
+      "size": [
+        380,
+        420
+      ],
+      "flags": {},
+      "order": 3,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "IMAGE",
+          "type": "IMAGE",
+          "links": [
+            5
+          ]
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "MusefishDLSS5NeuralRender"
+      },
+      "widgets_values": [
+        "default",
+        1.0,
+        0.94,
+        0.84,
+        1.0,
+        true,
+        0,
+        "off",
+        "ultra",
+        "auto"
+      ]
+    },
+    {
+      "id": 4,
+      "type": "VHS_VideoCombine",
+      "pos": [
+        940,
+        200
+      ],
+      "size": [
+        420,
+        320
+      ],
+      "flags": {},
+      "order": 4,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "images",
+          "type": "IMAGE",
+          "link": 5
+        },
+        {
+          "name": "audio",
+          "type": "AUDIO",
+          "link": 3
+        },
+        {
+          "name": "meta_batch",
+          "type": "VHS_BatchManager",
+          "link": null
+        },
+        {
+          "name": "vae",
+          "type": "VAE",
+          "link": null
+        },
+        {
+          "name": "frame_rate",
+          "type": "FLOAT",
+          "link": 4,
+          "widget": {
+            "name": "frame_rate"
+          }
+        },
+        {
+          "name": "loop_count",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "loop_count"
+          }
+        },
+        {
+          "name": "filename_prefix",
+          "type": "STRING",
+          "link": null,
+          "widget": {
+            "name": "filename_prefix"
+          }
+        },
+        {
+          "name": "format",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "format"
+          }
+        },
+        {
+          "name": "pingpong",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "pingpong"
+          }
+        },
+        {
+          "name": "save_output",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "save_output"
+          }
+        },
+        {
+          "name": "pix_fmt",
+          "type": "COMBO",
+          "link": null,
+          "widget": {
+            "name": "pix_fmt"
+          }
+        },
+        {
+          "name": "crf",
+          "type": "INT",
+          "link": null,
+          "widget": {
+            "name": "crf"
+          }
+        },
+        {
+          "name": "save_metadata",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "save_metadata"
+          }
+        },
+        {
+          "name": "trim_to_audio",
+          "type": "BOOLEAN",
+          "link": null,
+          "widget": {
+            "name": "trim_to_audio"
+          }
+        }
+      ],
+      "outputs": [
+        {
+          "name": "Filenames",
+          "type": "VHS_FILENAMES",
+          "links": null
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "VHS_VideoCombine"
+      },
+      "widgets_values": {
+        "frame_rate": 24,
+        "loop_count": 0,
+        "filename_prefix": "Musefish/DLSS5_video",
+        "format": "video/h264-mp4",
+        "pix_fmt": "yuv420p",
+        "crf": 19,
+        "save_metadata": true,
+        "trim_to_audio": true,
+        "pingpong": false,
+        "save_output": true,
+        "videopreview": null
+      }
+    }
+  ],
+  "links": [
+    {
+      "id": 1,
+      "type": "IMAGE",
+      "pos": [
+        0,
+        0
+      ],
+      "origin_id": 1,
+      "origin_slot": 0,
+      "target_id": 3,
+      "target_slot": 0
+    },
+    {
+      "id": 2,
+      "type": "VHS_VIDEOINFO",
+      "pos": [
+        0,
+        0
+      ],
+      "origin_id": 1,
+      "origin_slot": 3,
+      "target_id": 2,
+      "target_slot": 0
+    },
+    {
+      "id": 3,
+      "type": "AUDIO",
+      "pos": [
+        0,
+        0
+      ],
+      "origin_id": 1,
+      "origin_slot": 2,
+      "target_id": 4,
+      "target_slot": 1
+    },
+    {
+      "id": 4,
+      "type": "FLOAT",
+      "pos": [
+        0,
+        0
+      ],
+      "origin_id": 2,
+      "origin_slot": 0,
+      "target_id": 4,
+      "target_slot": 4
+    },
+    {
+      "id": 5,
+      "type": "IMAGE",
+      "pos": [
+        0,
+        0
+      ],
+      "origin_id": 3,
+      "origin_slot": 0,
+      "target_id": 4,
+      "target_slot": 0
+    }
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {
+    "note": "DLSS5 超分节点为 NVIDIA RTX 50 系 (Blackwell) 独占；40 系及更早显卡无法创建 NGX Feature 18。"
+  },
+  "version": 0.4
+}
