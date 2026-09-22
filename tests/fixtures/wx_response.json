@@ -1,0 +1,337 @@
+{
+    "code": 200,
+    "request_id": "b36a339c-1ed4-4798-9ea3-9fff1dce6a2f",
+    "message": "Request successful. This request will incur a charge.",
+    "message_zh": "请求成功，本次请求将被计费。",
+    "support": "Discord: https://discord.gg/aMEAS8Xsvz",
+    "time": "2025-10-15 03:34:24",
+    "time_stamp": 1760524464,
+    "time_zone": "America/Los_Angeles",
+    "docs": "https://api.tikhub.io/#/WeChat-Channels-API/fetch_video_detail_api_v1_wechat_channels_fetch_video_detail_get",
+    "cache_message": "This request will be cached. You can access the cached result directly using the URL below, valid for 24 hours.",
+    "cache_message_zh": "本次请求将被缓存，你可以使用下面的 URL 直接访问缓存结果，有效期为 24 小时。",
+    "cache_url": "https://cache.tikhub.io/api/v1/cache/public/b36a339c-1ed4-4798-9ea3-9fff1dce6a2f?sign=0e03bd8b5e05c3361f8f0dfeace456aa3eb33981c3a8289e557b60f95ac33e96",
+    "router": "/api/v1/wechat_channels/fetch_video_detail",
+    "params": {
+        "id": "14396973035218999573"
+    },
+    "data": {
+        "id": "14396973035218999573",
+        "nickname": "佳佳老师-努力版",
+        "username": "v2_060000231003b20faec8c7e58e1bc1d1c905ea37b0770368b6ad548d723634171b8e0eeff170@finder",
+        "object_desc": {
+            "description": "带孩子来北京旅游第一天我就后悔了#北京#北京旅游攻略#旅行推荐官#我的旅行日记#跟团游",
+            "media": [
+                {
+                    "url": "https://finder.video.qq.com/251/20302/stodownload?encfilekey=Cvvj5Ix3eewK0tHtibORqcsqchXNh0Gf3sJcaYqC2rQDFKfMJuEK7ribjtVrZJynxHs9IucnCXqIPJHiascSbdk6BrlInWMAiczF8fx9mBicEtCsqr7A7ITDrelbCzNlU4xfY&bizid=1023&dotrans=0&hy=SH&idx=1&m=&uzid=1&token=AxricY7RBHdU0OAdVicXSW4veiapib5oxOib9uRQcFicccaMiczictkQn68Zp6JX1da8pQtJ4H0fohLibya35bOFUawnLH2Cf7ybX1BGXUNEImSmuqOno9JXiafVk296ZMWPicAbN8ml6Ra9Tz1uhZCMxa89lceeFWV4bpYyTIy3qC2uatqzo0&basedata=CAESABoDeFYwIgAqBwiLKRAAGAI&sign=EITEholF7h-_js8GwFQOZ2miMP6UJI4R9UNHA6SkNuVfHtUFh0DV4fx42il6sbRP62LcBaelT8jvzLRsOd2oXA&ctsc=141&web=1&extg=10f0000&ftype=417&svrbypass=AAuL%2FQsFAAABAAAAAACsrIwfqmjvxA%2Flr3jvaBAAAADnaHZTnGbFfAj9RgZXfw6Vxxyyr4YvTFozgElsFt%2F7BH8AjATMJhpCDbez09AVBwBlAne7Ss%2FtAvY%3D&svrnonce=1760524463",
+                    "thumb_url": "https://finder.video.qq.com/251/20304/stodownload?encfilekey=rjD5jyTuFrIpZ2ibE8T7Ym3K77SEULgkia943VUmotibxAfXAd748CscH6AeiaOhLqLTPwOwUibibUJSaibvicAaownnJFkYqI1LiawYJtj2v0Udhbatn7luFiaxjhJQ&dotrans=0&hy=SZ&idx=1&m=&scene=2&uzid=2&picformat=200&token=cztXnd9GyrGhE2iaHGOXDiaCZM5peqiciaZj7EIOT6KTic9ek6biaHjaL1B3AHlMP3xsX7egYpfsPhlict5pzqiavzutmgUGibLyibBSicOsJ16pf04qypk4m85UEv6vKEmBSC5LjcMrkR2DUicGp9BBibkpYoFCqhh5tm57sJnrib&ctsc=1-141",
+                    "media_type": 4,
+                    "video_play_len": 52,
+                    "width": 720.0,
+                    "height": 1280.0,
+                    "md5sum": "a4087c1f46961fc4165c67c508ce0506",
+                    "file_size": 14088528,
+                    "bitrate": 2066432,
+                    "spec": [
+                        {
+                            "file_format": "xWT111",
+                            "first_load_bytes": 1989820,
+                            "bit_rate": 263,
+                            "coding_format": "h264",
+                            "dynamic_range_type": 0,
+                            "vfps": 30.0,
+                            "width": 720,
+                            "height": 1280,
+                            "duration_ms": 52300,
+                            "quality_score": 0,
+                            "video_bitrate": 2018,
+                            "audio_bitrate": 128,
+                            "level_order": 100,
+                            "bypass": "{\"rid\":\"1760524463741618761\";\"level_order\":100;\"ip_area_id\":\"cn.ml\";\"ftype\":\"417\";\"max_bitrate\":150;\"trans_flag\":21;\"phone_level\":0;\"full_url_type\":0;\"video_play_len\":52;\"grade\":1;\"highest_grade\":1;\"lowest_grade\":3;\"cgi_id\":3763;\"cgi_scene\":6;\"pre_f_time\":30000;\"b_len\":10;\"avg_v_len\":52;\"fake_uin\":4122229112}",
+                            "is_3az": 0
+                        },
+                        {
+                            "file_format": "xWT112",
+                            "first_load_bytes": 1769820,
+                            "bit_rate": 219,
+                            "coding_format": "h264",
+                            "dynamic_range_type": 0,
+                            "vfps": 30.0,
+                            "width": 576,
+                            "height": 1024,
+                            "duration_ms": 52300,
+                            "quality_score": 76,
+                            "video_bitrate": 1658,
+                            "audio_bitrate": 128,
+                            "level_order": 200,
+                            "bypass": "{\"rid\":\"1760524463741618761\";\"level_order\":200;\"ip_area_id\":\"cn.ml\";\"ftype\":\"417\";\"max_bitrate\":150;\"trans_flag\":21;\"phone_level\":0;\"full_url_type\":0;\"video_play_len\":52;\"grade\":2;\"highest_grade\":1;\"lowest_grade\":3;\"cgi_id\":3763;\"cgi_scene\":6;\"pre_f_time\":30000;\"b_len\":10;\"avg_v_len\":52;\"fake_uin\":4122229112}",
+                            "is_3az": 0
+                        },
+                        {
+                            "file_format": "xWT113",
+                            "first_load_bytes": 1349513,
+                            "bit_rate": 170,
+                            "coding_format": "h264",
+                            "dynamic_range_type": 0,
+                            "vfps": 30.0,
+                            "width": 576,
+                            "height": 1024,
+                            "duration_ms": 52300,
+                            "quality_score": 74,
+                            "video_bitrate": 1261,
+                            "audio_bitrate": 128,
+                            "level_order": 300,
+                            "bypass": "{\"rid\":\"1760524463741618761\";\"level_order\":300;\"ip_area_id\":\"cn.ml\";\"ftype\":\"417\";\"max_bitrate\":150;\"trans_flag\":21;\"phone_level\":0;\"full_url_type\":0;\"video_play_len\":52;\"grade\":3;\"highest_grade\":1;\"lowest_grade\":3;\"cgi_id\":3763;\"cgi_scene\":6;\"pre_f_time\":30000;\"b_len\":10;\"avg_v_len\":52;\"fake_uin\":4122229112}",
+                            "is_3az": 0
+                        },
+                        {
+                            "file_format": "xWT156",
+                            "first_load_bytes": 1119125,
+                            "bit_rate": 156,
+                            "coding_format": "h265",
+                            "dynamic_range_type": 0,
+                            "vfps": 30.0,
+                            "width": 720,
+                            "height": 1280,
+                            "duration_ms": 52300,
+                            "quality_score": 80,
+                            "video_bitrate": 1143,
+                            "audio_bitrate": 128,
+                            "level_order": 100,
+                            "bypass": "{\"rid\":\"1760524463741618761\";\"level_order\":100;\"ip_area_id\":\"cn.ml\";\"ftype\":\"417\";\"max_bitrate\":150;\"trans_flag\":21;\"phone_level\":0;\"full_url_type\":0;\"video_play_len\":52;\"grade\":1;\"highest_grade\":1;\"lowest_grade\":3;\"cgi_id\":3763;\"cgi_scene\":6;\"pre_f_time\":30000;\"b_len\":10;\"avg_v_len\":52;\"fake_uin\":4122229112}",
+                            "is_3az": 0
+                        },
+                        {
+                            "file_format": "xWT157",
+                            "first_load_bytes": 914900,
+                            "bit_rate": 130,
+                            "coding_format": "h265",
+                            "dynamic_range_type": 0,
+                            "vfps": 30.0,
+                            "width": 576,
+                            "height": 1024,
+                            "duration_ms": 52300,
+                            "quality_score": 73,
+                            "video_bitrate": 928,
+                            "audio_bitrate": 128,
+                            "level_order": 200,
+                            "bypass": "{\"rid\":\"1760524463741618761\";\"level_order\":200;\"ip_area_id\":\"cn.ml\";\"ftype\":\"417\";\"max_bitrate\":150;\"trans_flag\":21;\"phone_level\":0;\"full_url_type\":0;\"video_play_len\":52;\"grade\":2;\"highest_grade\":1;\"lowest_grade\":3;\"cgi_id\":3763;\"cgi_scene\":6;\"pre_f_time\":30000;\"b_len\":10;\"avg_v_len\":52;\"fake_uin\":4122229112}",
+                            "is_3az": 0
+                        },
+                        {
+                            "file_format": "xWT158",
+                            "first_load_bytes": 710639,
+                            "bit_rate": 103,
+                            "coding_format": "h265",
+                            "dynamic_range_type": 0,
+                            "vfps": 30.0,
+                            "width": 576,
+                            "height": 1024,
+                            "duration_ms": 52300,
+                            "quality_score": 71,
+                            "video_bitrate": 712,
+                            "audio_bitrate": 128,
+                            "level_order": 300,
+                            "bypass": "{\"rid\":\"1760524463741618761\";\"level_order\":300;\"ip_area_id\":\"cn.ml\";\"ftype\":\"417\";\"max_bitrate\":150;\"trans_flag\":21;\"phone_level\":0;\"full_url_type\":0;\"video_play_len\":52;\"grade\":3;\"highest_grade\":1;\"lowest_grade\":3;\"cgi_id\":3763;\"cgi_scene\":6;\"pre_f_time\":30000;\"b_len\":10;\"avg_v_len\":52;\"fake_uin\":4122229112}",
+                            "is_3az": 0
+                        }
+                    ],
+                    "cover_url": "http://wxapp.tc.qq.com/251/20304/stodownload?encfilekey=rjD5jyTuFrIpZ2ibE8T7Ym3K77SEULgkia943VUmotibxAfXAd748CscH6AeiaOhLqLTPwOwUibibUJSaibvicAaownnJFkYqI1LiawYJtj2v0Udhbatn7luFiaxjhJQ&token=x5Y29zUxcibA8OUawCN97XhLesuEXBnuqQcoJSxlAmMZZZhybqzospvjBIGxhIutewInR3KtfYCua3hY00vdibOCZ1T3LoQUZnjy0Ksn1x6kVoGR5a5IM2KpB2pR1JEibtvWawbk4mCjJibNV5SmbHZ1B0eQYVVIHgnP&idx=1&dotrans=0&hy=SZ&m=&scene=2&uzid=2&picformat=200",
+                    "decode_key": "2136343393",
+                    "url_token": "&token=AxricY7RBHdU0OAdVicXSW4veiapib5oxOib9uRQcFicccaMiczictkQn68Zp6JX1da8pQtJ4H0fohLibya35bOFUawnLH2Cf7ybX1BGXUNEImSmuqOno9JXiafVk296ZMWPicAbN8ml6Ra9Tz1uhZCMxa89lceeFWV4bpYyTIy3qC2uatqzo0&basedata=CAESABoDeFYwIgAqBwiLKRAAGAI&sign=EITEholF7h-_js8GwFQOZ2miMP6UJI4R9UNHA6SkNuVfHtUFh0DV4fx42il6sbRP62LcBaelT8jvzLRsOd2oXA&ctsc=141&web=1&extg=10f0000&ftype=417&svrbypass=AAuL%2FQsFAAABAAAAAACsrIwfqmjvxA%2Flr3jvaBAAAADnaHZTnGbFfAj9RgZXfw6Vxxyyr4YvTFozgElsFt%2F7BH8AjATMJhpCDbez09AVBwBlAne7Ss%2FtAvY%3D&svrnonce=1760524463",
+                    "codec_info": {
+                        "video_score": 59.0
+                    },
+                    "full_thumb_url": "https://finder.video.qq.com/251/20304/stodownload?encfilekey=rjD5jyTuFrIpZ2ibE8T7Ym3K77SEULgkia943VUmotibxAfXAd748CscH6AeiaOhLqLTPwOwUibibUJSaibvicAaownnJFkYqI1LiawYJtj2v0Udhbatn7luFiaxjhJQ&dotrans=0&hy=SZ&idx=1&m=&scene=2&uzid=2&picformat=200&token=x5Y29zUxcibA8OUawCN97XvrwADwSPrOmnVMvgoPbKKicbIbYXufUutPyLIMRldiaPG7icOm081lW4IW0EGDRX31Ijw1kVmW3I44Soic3Srjic8ibz77IibSrgyCPJZMdNHyHOibmsibV3eoXG1zIN2FDKu1nhpfTlF1qw42Sn&ctsc=3-141",
+                    "full_url": "",
+                    "full_width": 0.0,
+                    "full_height": 0.0,
+                    "full_md5sum": "",
+                    "full_file_size": 0,
+                    "full_bitrate": 0,
+                    "full_cover_url": "https://finder.video.qq.com/251/20304/stodownload?encfilekey=rjD5jyTuFrIpZ2ibE8T7Ym3K77SEULgkia943VUmotibxAfXAd748CscH6AeiaOhLqLTPwOwUibibUJSaibvicAaownnJFkYqI1LiawYJtj2v0Udhbatn7luFiaxjhJQ&token=x5Y29zUxcibDjE9JYkmdS0pjkicoNWSyBXjLOjFY4Y7uBjhfh1zLMlI3RWuvdUdcAt1AbhbImTNoQZBMTZtya7C9cOEQ1ZKXSSWh7IBDYibeiab4VzZTgz3feJObKryUtGibOPzBOeX0ztYPYx9ZhzH5D4Df4iaibBFOHRf&idx=1&dotrans=0&hy=SZ&m=&scene=2&uzid=2&picformat=200&ctsc=6-141",
+                    "live_cover_imgs": [],
+                    "scaling_info": {
+                        "version": "v2.0.1",
+                        "is_split_screen": false,
+                        "is_disable_follow": false,
+                        "up_percent_position": 0.0,
+                        "down_percent_position": 0.0
+                    },
+                    "audio_spec": [],
+                    "media_cdn_info": {
+                        "is_use_pcdn": true,
+                        "begin_use_pcdn_buffer_seconds": 12,
+                        "exit_use_pcdn_buffer_seconds": 8,
+                        "preload_begin_use_pcdn_buffer_kbytes": 768,
+                        "pcdn_timeout_retry_count": 1,
+                        "mars_pre_download_kbytes": 0,
+                        "is_use_ugc_when_no_preload": true,
+                        "preload_use_pcdn_only": true,
+                        "preload_pcdn_connections": 4,
+                        "soc_force_use_h3": false
+                    }
+                }
+            ],
+            "media_type": 4,
+            "location": {
+                "product_id": [],
+                "multi_lang_info": []
+            },
+            "ext_reading": {},
+            "topic": {},
+            "mentioned_user": [],
+            "feed_location": {
+                "product_id": [],
+                "multi_lang_info": []
+            },
+            "mentioned_musics": [],
+            "short_title": [
+                {
+                    "short_title": "北京旅游报团推荐"
+                }
+            ],
+            "flow_card_desc": {
+                "description": "带孩子来北京旅游第一天我就后悔了"
+            },
+            "finder_newlife_desc": {
+                "secretly_push_chatroom_name": [],
+                "comment_egg_info": [],
+                "video_tmpl_info": [],
+                "custom_crop_info": [],
+                "mp_locations": []
+            },
+            "member_data": {},
+            "mod_feed_info": {
+                "history": [],
+                "modify_button_status": 0,
+                "button_tips_wording": "发表超过3个月后无法修改"
+            }
+        },
+        "createtime": 1716252927,
+        "like_flag": 0,
+        "like_list": [],
+        "comment_list": [],
+        "forward_count": 2602,
+        "contact": {
+            "username": "v2_060000231003b20faec8c7e58e1bc1d1c905ea37b0770368b6ad548d723634171b8e0eeff170@finder",
+            "nickname": "佳佳老师-努力版",
+            "head_url": "https://wx.qlogo.cn/finderhead/ver_1/HobNmPgW6o9b3riajQfAunTaBP5Nd6aLCicBpr0H8XxtYL0zSZ4v8LtAjG2ubKVR9bQvWRCZgQIOGg0wJbFzOtQ6Y7up7dViagSviaIwVB3epDU/132",
+            "signature": "童蒙养正 \n用老祖宗的智慧养正孩子",
+            "follow_flag": 0,
+            "cover_img_url": "",
+            "spam_status": 0,
+            "ext_flag": 2097164,
+            "ext_info": {
+                "country": "CN",
+                "province": "Hunan",
+                "city": "Changsha",
+                "sex": 2
+            },
+            "live_status": 2,
+            "live_cover_img_url": "",
+            "live_info": {
+                "anchor_status_flag": "2048",
+                "switch_flag": 4607,
+                "source_type": 0,
+                "mic_setting": {
+                    "setting_flag": 0,
+                    "setting_switch_flag": 4
+                },
+                "lottery_setting": {},
+                "live_cover_imgs": []
+            },
+            "friend_follow_count": 0,
+            "feed_count": 272,
+            "bind_info": [],
+            "menu": [],
+            "status": "0",
+            "additional_flag": "1"
+        },
+        "recommender_list": [],
+        "like_count": 2570,
+        "comment_count": 268,
+        "friend_like_count": 0,
+        "object_nonce_id": "14645445282565319987_0_141_0_0",
+        "object_status": 0,
+        "send_share_fav_wording": "",
+        "original_flag": 0,
+        "secondary_show_flag": 1,
+        "mentioned_user_contact": [],
+        "session_buffer": "eyJjdXJfbGlrZV9jb3VudCI6MjU3MCwiY3VyX2NvbW1lbnRfY291bnQiOjI2OCwicmVjYWxsX3R5cGVzIjpbXSwiZGVsaXZlcnlfc2NlbmUiOjYsImRlbGl2ZXJ5X3RpbWUiOjE3NjA1MjQ0NjMsInNldF9jb25kaXRpb25fZmxhZyI6MjksInJlY2FsbF9pbmRleCI6W10sInJlY2FsbF9pbmZvIjpbXSwic2VjcmV0ZV9kYXRhIjoiQmdBQVo5WHliRFgwYlljNTVGTDVpSFwvTm1TT1BPKzFRMURyYVpRMDU4eDk2SDNHMDlqTkdTY3pEYWZHdHIrNlFKTHhRdzVaY3NRSWwiLCJpZGMiOjMsImRldmljZV90eXBlX2lkIjoyOSwiY2xpZW50X3JlcG9ydF9idWZmIjoie1wiZW50cmFuY2VJZFwiOlwiMTAwMVwifSIsImNvbW1lbnRfc2NlbmUiOjE0MSwib2JqZWN0X2lkIjoxNDM5Njk3MzAzNTIxODk5OTU3MywiZW50cmFuY2Vfc2NlbmUiOjMyLCJjYXJkX3R5cGUiOjIwLCJleHB0X2ZsYWciOjEsImN0eF9pZCI6IjMyLTIwLTE0MC1XZjY1NWU5ZWE4Nzg0YTEwYzE3NjA1MjQ0NjMwMTAiLCJvYmpfZmxhZyI6MTYzODQwLCJlcmlsIjpbXSwicGdrZXlzIjpbXSwib2JqX2V4dF9mbGFnIjoyNzAzMzYsInNjaWQiOiI4NDU3NzQ1Mi1hOWIyLTExZjAtOTI3MC04N2NiN2NkOGVhM2YifQ==",
+        "fav_count": 4703,
+        "fav_flag": 0,
+        "url_valid_duration": 172800,
+        "forward_style": 0,
+        "permission_flag": 2147483648,
+        "object_type": 0,
+        "friend_comment_list": [],
+        "ad_flag": 4,
+        "func_flag": 272,
+        "show_original": false,
+        "finder_promotion_jumpinfo": {
+            "toast_msg": "无法推广3个月以上的视频或照片",
+            "show_toast_msg": true,
+            "wording": "帮上热门",
+            "destination_type": 1
+        },
+        "ip_region_info": {
+            "region_text": "湖南"
+        },
+        "object_extend": {
+            "fav_info": {
+                "star_fav_flag": 0,
+                "star_fav_count": 0,
+                "fingerlike_fav_flag": 0,
+                "fingerlike_fav_count": 4632
+            },
+            "preload_config": {
+                "comment_is_preload": true,
+                "comment_wait_time": 0,
+                "comment_preload_buffer": "CAEQAA=="
+            },
+            "monotonic_data": {
+                "count_info": {
+                    "comment_count": 268,
+                    "like_count": 2570,
+                    "forward_count": 2602,
+                    "read_count": 0,
+                    "fav_count": 4703,
+                    "version_data": {
+                        "data_version": 1760511462,
+                        "overwrite": false
+                    }
+                },
+                "comment_count": {
+                    "comment_count": 268,
+                    "image_comment_count": 0,
+                    "version_data": {
+                        "data_version": 1760511462
+                    }
+                },
+                "global_fav_count": {},
+                "global_fav_flag": {},
+                "thumb_up_count": {
+                    "thumb_up_count": 4703
+                },
+                "thumb_up_flag": {},
+                "chatroom_push_count": {},
+                "chatroom_push_flag": {
+                    "chatroom_push_list": []
+                },
+                "thank_chatroom_push_flag": {}
+            },
+            "finder_newlife_info": {
+                "chatroom_push_list": [],
+                "picture_crop_info": [],
+                "follow_post_info": {}
+            },
+            "original_info": {
+                "original_audit_status": 1
+            },
+            "carousel_info": {
+                "carousel_comment_latency_time": 10
+            }
+        }
+    }
+}

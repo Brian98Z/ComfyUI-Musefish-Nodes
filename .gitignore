@@ -5,3 +5,10 @@ __pycache__/
 # redistributable; see DLSS5_README.md for manual setup.
 dlss5_backend/dlls/*.dll
 dlss5_backend/logs/
+
+# Local credentials & runtime state — never publish (browser cookies,
+# tokened WC URLs are temporary access credentials).
+_dy_cookies.txt
+_yt_cookies.txt
+_wc_url_cache.json
+_ytdlp_update_stamp.json
