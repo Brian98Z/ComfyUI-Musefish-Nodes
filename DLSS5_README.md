@@ -18,7 +18,6 @@
 - `dlss5_backend/session.py` — 会话管理（子进程生命周期、共享内存帧协议）
 - `dlss5_backend/worker.py` — 子进程入口（ctypes 驱动 DLL + 共享内存 pinned 注册）
 - `dlss5_backend/dlls/` — NVIDIA 专有运行库（**不入库**，`.gitignore` 已排除）。手动部署：从 DLSS5Tool 安装目录的 `_internal/` 复制 `dlssnr_host.dll`、`nvngx_dlssnr.dll`、`vsr_host.dll`、`nvngx_vsr.dll` 四个 DLL 到该目录即可。
-- `workflows/Musefish_DLSS5_Test.json` — 图片测试工作流
 - `workflows/Musefish_DLSS5_Video_Segments.json` — 长视频分段增强案例工作流
 
 ## 架构
@@ -72,12 +71,12 @@ NGX 宿主在**每次节点执行时拉起的一次性子进程**里运行，Com
 
 ```
 VHS_LoadVideoFFmpegPath (frame_load_cap=每段帧数, start_time=段起点)
-  → MusefishDLSS5NeuralRender (keep_session=auto)
+  → MusefishDLSS5NeuralRender (模板示例 keep_session=off；相邻段批量跑可改 auto)
     → VHS_VideoCombine (audio 直通, frame_rate 取自 VHS_VideoInfoSource)
 ```
 
 - **每段独立执行**：内存峰值 ≈ 段帧数 × 单帧，而非整片；长视频不会爆内存。
-- **keep_session=auto**：相邻段复用热 worker，跳过 ~3s NGX 冷启动；
+- **keep_session=auto**（模板示例为 `off`）：相邻段复用热 worker，跳过 ~3s NGX 冷启动；
   段首帧自动重置时序历史，段间接缝与冷启动输出一致。
 - 想跑全片：把 `start_time` 递增（秒），段长保持不变，最后用
   VHS_VideoCombine 的文件或外部工具拼接。

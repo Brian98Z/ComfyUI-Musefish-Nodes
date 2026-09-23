@@ -330,11 +330,10 @@ decode VAE:
   不影响 ComfyUI 主进程；详见 [DLSS5_README.md](DLSS5_README.md)。
 - 案例效果：[assets/DLSS5超分案例.mp4](assets/DLSS5超分案例.mp4)
   （1472×1280@24fps，10 秒，2× RTX VSR + Feature 18 实测输出）。
-- [Musefish_DLSS5_Test.json](workflows/Musefish_DLSS5_Test.json)：图片
-  增强最小链路（LoadImage → DLSS5 → SaveImage）。
 - [Musefish_DLSS5_Video_Segments.json](workflows/Musefish_DLSS5_Video_Segments.json)：
   长视频分段增强案例（LoadVideoFFmpegPath 分段 → DLSS5 → VideoCombine，
-  音频直通、帧率自动取源；`keep_session=auto` 复用热 worker）。
+  音频直通、帧率自动取源；模板示例 `keep_session=off`，改成 `auto`
+  可跨段复用热 worker、跳过每次约 3s 的 NGX 引导）。
 
 ## 音频超分处理
 
