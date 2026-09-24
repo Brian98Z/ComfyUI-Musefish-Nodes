@@ -129,19 +129,19 @@ def _unpin_shared_buffer(cudart, ptr) -> None:
 
 def _worker_loop(lib, vsr_lib, request: dict, log_path: str, sr_scale: int,
                  width: int, height: int) -> int:
-    input_shm = shared_memory.SharedMemory(name=request["input_shm"])
-    output_shm = shared_memory.SharedMemory(name=request["output_shm"])
+    input_shms = [shared_memory.SharedMemory(name=name) for name in request["input_shm"]]
+    output_shms = [shared_memory.SharedMemory(name=name) for name in request["output_shm"]]
     in_shape = (height, width, 4)
     out_shape = (height * sr_scale, width * sr_scale, 4)
-    input_view = np.ndarray(in_shape, dtype=np.uint8, buffer=input_shm.buf)
-    output_view = np.ndarray(out_shape, dtype=np.uint8, buffer=output_shm.buf)
+    input_views = [np.ndarray(in_shape, dtype=np.uint8, buffer=shm.buf) for shm in input_shms]
+    output_views = [np.ndarray(out_shape, dtype=np.uint8, buffer=shm.buf) for shm in output_shms]
 
     # Pin the ring buffers in THIS process: the NGX host's D3D12 engine does its
     # DMA uploads/downloads from this address space, and pinned registration is
     # tracked per-process.
     cudart = _load_cudart()
-    in_pin = _pin_shared_buffer(input_shm)
-    out_pin = _pin_shared_buffer(output_shm)
+    in_pins = [_pin_shared_buffer(shm) for shm in input_shms]
+    out_pins = [_pin_shared_buffer(shm) for shm in output_shms]
 
     mv = np.zeros(out_shape[:2], np.float32)
     dp = np.zeros(out_shape[:2], np.float32)
@@ -163,7 +163,10 @@ def _worker_loop(lib, vsr_lib, request: dict, log_path: str, sr_scale: int,
                 _emit({"ok": False, "error": f"unknown op: {op!r}"})
                 return 2
             try:
-                rgba = input_view
+                slot = int(message.get("slot") or 0)
+                if not 0 <= slot < len(input_views):
+                    raise RuntimeError(f"bad slot: {slot!r}")
+                rgba = input_views[slot]
                 reset = 1 if message.get("reset") else 0
                 if vsr_lib is not None:
                     if not vsr_lib.vsr_process(
@@ -175,7 +178,7 @@ def _worker_loop(lib, vsr_lib, request: dict, log_path: str, sr_scale: int,
                     rgba.ctypes.data_as(ctypes.c_void_p),
                     mv.ctypes.data_as(ctypes.c_void_p),
                     dp.ctypes.data_as(ctypes.c_void_p),
-                    output_view.ctypes.data_as(ctypes.c_void_p),
+                    output_views[slot].ctypes.data_as(ctypes.c_void_p),
                     reset,
                 )
                 if not ok:
@@ -194,13 +197,13 @@ def _worker_loop(lib, vsr_lib, request: dict, log_path: str, sr_scale: int,
                 vsr_lib.vsr_shutdown()
             except Exception:  # noqa: BLE001
                 traceback.print_exc(file=sys.stderr)
-        for shm in (input_shm, output_shm):
+        for shm in input_shms + output_shms:
             try:
                 shm.close()
             except OSError:
                 pass
-        _unpin_shared_buffer(cudart, in_pin)
-        _unpin_shared_buffer(cudart, out_pin)
+        for pin in in_pins + out_pins:
+            _unpin_shared_buffer(cudart, pin)
         # Parent unlinks its own handles; worker never unlinks (it opened
         # with create=False), matching multiprocessing ownership guidance.
     _emit({"ok": True, "event": "closed"})
@@ -210,6 +213,7 @@ def _worker_loop(lib, vsr_lib, request: dict, log_path: str, sr_scale: int,
 def main() -> int:
     request = json.loads(sys.argv[sys.argv.index("--request") + 1])
     dll_dir = request["dll_dir"]
+    log_dir = os.path.dirname(request["log_path"])
     log_path = request["log_path"]
     width = int(request["width"])
     height = int(request["height"])
@@ -233,9 +237,9 @@ def main() -> int:
     if sr_scale > 1:
         vsr_lib = _load_vsr(dll_dir, sr_scale)
         if not vsr_lib.vsr_init(width, height, sr_scale, int(request.get("vsr_quality", 4)),
-                                0, dll_dir, os.path.join(dll_dir, "vsr_run.log")):
+                                0, dll_dir, os.path.join(log_dir, "vsr_run.log")):
             _emit({"ok": False, "error": "vsr_init failed (RTX VSR gate)",
-                   "log_tail": _log_tail(os.path.join(dll_dir, "vsr_run.log"))})
+                   "log_tail": _log_tail(os.path.join(log_dir, "vsr_run.log"))})
             return 1
 
     if not lib.dlssnr_init(width * sr_scale, height * sr_scale, int(request.get("preset", 1)),

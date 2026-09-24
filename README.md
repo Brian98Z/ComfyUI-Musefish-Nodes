@@ -321,19 +321,31 @@ decode VAE:
 
 ### 功能概览
 
-- **图像超分、视频超分均可使用**：输入为标准 IMAGE 批次（单图、图组、
-  VHS 解出的视频帧序列均可），输出保持批次结构直接接 SaveImage /
-  VHS_VideoCombine。
+- **图像与短视频**：`MusefishDLSS5NeuralRender` 输入标准 IMAGE 批次、
+  固定单 worker；输出接 SaveImage 或 VHS_VideoCombine。提供与流式节点相同的
+  「放大参数」和第三位 `vsr_quality`，但整个 float32 输出批次超过 1 GiB 时拒绝。
 - `musefish_dlss5.py` + `dlss5_backend/`：把 DLSS5Tool 的 DLSS 5 超分
   （NGX Feature 18）与 RTX 视频超分封装为 `MusefishDLSS5NeuralRender`
   节点（分类 `Musefish/Video`），在隔离子进程里驱动 NVIDIA DLL，崩溃
   不影响 ComfyUI 主进程；详见 [DLSS5_README.md](DLSS5_README.md)。
 - 案例效果：[assets/DLSS5超分案例.mp4](assets/DLSS5超分案例.mp4)
   （1472×1280@24fps，10 秒，2× RTX VSR + Feature 18 实测输出）。
-- [Musefish_DLSS5_Video_Segments.json](workflows/Musefish_DLSS5_Video_Segments.json)：
-  长视频分段增强案例（LoadVideoFFmpegPath 分段 → DLSS5 → VideoCombine，
-  音频直通、帧率自动取源；模板示例 `keep_session=off`，改成 `auto`
-  可跨段复用热 worker、跳过每次约 3s 的 NGX 引导）。
+- **高清长视频**：`LoadVideo → MusefishDLSS5VideoStream → SaveVideo` 均使用
+  VIDEO 类型；内部连续解码、增强、编码和音频封装，SaveVideo 输出成片。
+  不积累整批 IMAGE，不需手动拼接。旧分段模板仅供历史兼容。
+  内层编码默认 `libx264`；可选 `h264_nvenc` 降低 CPU 编码开销（固定 CQ 27，
+  与 `crf` 不是同一画质刻度）。中间文件名自动生成，最终名称在 SaveVideo 设置。
+  若接 `Video Slice`，节点会按裁剪的起点与时长处理视频和音频，
+  不会再把原片全长送入 DLSS5。
+  两节点的「放大参数」均提供 1× (Native)、1.5× (Quality)、2× (Balance)、
+  3× (Performance)、4× (Ultra) 与 1K–8K 目标档；第三个控件 `vsr_quality`
+  才控制实际 VSR 质量。1.5×/3× 为 VSR 合成缩放，不是原生倍率。
+  横竖屏均按短边选 K 档：720p→4K 采用 5120×2880 中间帧后输出 3840×2160；
+  1080p→8K 输出 7680×4320（竖屏为 4320×7680），需 GPU 编码并自动使用
+  HEVC NVENC。720p 无法用至多 4× VSR 达到 8K。
+  四个外部 DLL 放在 `ComfyUI/models/dlss5/`；用户提供的下载分享为
+  <https://pan.quark.cn/s/d4c04dc33d25>（非 NVIDIA 官方发行）。文件清单与
+  其他依赖见 [DLSS5_README.md](DLSS5_README.md)。
 
 ## 音频超分处理
 
@@ -487,6 +499,12 @@ MusefishUniverSRModel（speech）── model_cache ─→ ↑
 - [Musefish_UniverSR_Audio.json](workflows/Musefish_UniverSR_Audio.json)：音乐/语音双分支参考模板，分别连接模型缓存、音频保存和日志展示节点。
 
 ## 更新日志
+
+### v1.4.0（2026-09-25）
+
+- 新增 `MusefishDLSS5VideoStream`：文件支持的 VIDEO 逐帧解码、连续 NGX 会话增强、编码并保留音轨；遵循 `Video Slice` 起点和时长，通过 ComfyUI 原生进度事件显示处理进度。
+- IMAGE/VIDEO 两节点统一「放大参数」档位（1×、1.5×、2×、3×、4×及 1K–8K）和前端旧工作流控件迁移；1.5×/3× 为 VSR 合成倍率。720p→4K 与 1080p→8K（横竖屏）完成实际出片验证；IMAGE 批次超过 1 GiB 则提示使用流式节点。
+- VIDEO 支持可选 NVENC；8K 自动采用 HEVC NVENC，低分辨率继续使用 H.264。NVIDIA 私有运行库统一从 ComfyUI 的 `models/dlss5/` 读取，不随插件分发；安装清单见 [DLSS5_README.md](DLSS5_README.md)。
 
 ### v1.3.0（2026-09-22）
 

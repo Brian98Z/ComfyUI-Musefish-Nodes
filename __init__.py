@@ -3,6 +3,7 @@
 from . import _startup_update  # noqa: F401  (background yt-dlp self-update)
 from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel, MusefishUniverSRSpeechAudio
 from .musefish_dlss5 import MusefishDLSS5NeuralRender
+from .musefish_dlss5_stream import MusefishDLSS5VideoStream
 from .musefish_nodes import (
     AutoBatchAntiflicker,
     AutoBatchImageSharpenFS,
@@ -28,6 +29,7 @@ __all__ = [
     "AutoBatchAntiflicker",
     "AutoBatchImageSharpenFS",
     "MusefishDLSS5NeuralRender",
+    "MusefishDLSS5VideoStream",
     "MusefishVideoDownload",
     "MusefishWeChatChannels",
 ]

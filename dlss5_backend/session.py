@@ -7,19 +7,29 @@ Protocol (worker.py, JSON lines on stdout):
   parent -> worker: {"op": "init", "width", "height", "style", "intensity",
                      "local_tone", "local_struct", "skin_struct", "use_auto_mask",
                      "super_resolution_scale", "vsr_quality",
-                     "input_shm", "output_shm", "dll_dir", "log_path"}
+                     "input_shm": [name, ...], "output_shm": [name, ...],
+                     "dll_dir", "log_path"}
   worker -> parent: {"ok": true, "event": "ready"}
-  parent -> worker: {"op": "frame", "reset": bool}
+  parent -> worker: {"op": "frame", "slot": 0|1, "reset": bool}
   worker -> parent: {"ok": true, "event": "frame"}
   parent -> worker: {"op": "close"}
   worker -> parent: {"ok": true, "event": "closed"} then exits
   any failure:      {"ok": false, "error": "...", "log_tail": "..."}
 
-Frames travel through two shared-memory ring buffers (input at source
+Frames travel through two shared-memory ring slots (input at source
 resolution, output at super_resolution target) — zero-copy on the worker
 side, one array copy each way on the parent. NGX requires contiguous RGBA8
 host buffers; shared memory avoids the 85ms/frame PNG encode+decode tax at
 2x target sizes (measured 27x faster than the previous PNG file protocol).
+
+The two slots make the session a 2-deep pipeline: while the worker is inside
+its NGX call for frame n, the parent fills slot n+1 and converts the result
+of slot n-1. The parent's per-frame pixel conversion therefore overlaps the
+engine instead of serialising with it — measured at 480x848 -> 2x ultra, the
+engine call is ~17ms/frame, so the parent's conversion runs entirely inside
+that window and the GPU stops idling between frames. Ordering is preserved
+(one request in, one ordered ack out, same reset flags), so the temporal
+history and the output bytes are identical to a strictly sequential session.
 """
 from __future__ import annotations
 
@@ -28,13 +38,15 @@ import os
 import subprocess
 import sys
 import time
+from collections import deque
 from multiprocessing import shared_memory
 from pathlib import Path
 
 import numpy as np
+import folder_paths
 
 _BACKEND_DIR = Path(__file__).resolve().parent
-_DLL_DIR = _BACKEND_DIR / "dlls"
+_DLL_DIR = Path(folder_paths.models_dir) / "dlss5"
 # Legacy host is the verified working backend on this machine (RTX 5070 Ti,
 # driver 616.56): full frame loop completes in ~4ms/frame at 256px. The v2
 # host (dlssnr_host_v2.dll) hangs inside its first dlssnr_process call on
@@ -47,33 +59,46 @@ _WORKER = _BACKEND_DIR / "worker.py"
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+# Ring depth: 2 keeps one slot being written by the parent while the worker
+# owns the other, which is all the overlap the engine's latency needs.
+_RING_DEPTH = 2
+
 
 class DLSS5Error(RuntimeError):
     """The isolated DLSS5 worker failed, exited, or stopped responding."""
 
 
-def backend_available() -> tuple[bool, str]:
-    """Cheap availability probe used by the node before spawning a worker."""
-    if not _HOST_DLL.is_file():
-        return False, f"missing {_HOST_DLL}"
-    if not _RUNTIME_DLL.is_file():
-        return False, f"missing {_RUNTIME_DLL}"
+def backend_available(super_resolution_scale: int = 1) -> tuple[bool, str]:
+    """Check only the runtime files required by the chosen VSR scale."""
+    required = (_HOST_DLL, _RUNTIME_DLL)
+    if super_resolution_scale > 1:
+        required += (_VSR_HOST_DLL, _VSR_RUNTIME_DLL)
+    for path in required:
+        if not path.is_file():
+            return False, f"missing {path} (install the DLSS5 runtime in models/dlss5)"
     return True, "ok"
 
 
 class DLSS5Session:
     """One worker process bound to one (width, height, style) contract.
 
-    The session is strictly sequential: copy the frame into the input shared
-    buffer, send one JSON line, wait for the ack, copy the result out. The
-    worker owns the NGX feature lifecycle; the parent only touches pixels.
+    Frame flow — strictly ordered, up to `_RING_DEPTH` frames in flight::
+
+        view = session.next_input()   # shared buffer for the next frame
+        view[:, :, :3] = pixels       # caller fills it (no copy on this side)
+        session.push(reset=bool)      # hand the frame to the worker
+        ...
+        rgba = session.pull()         # ordered ack, returns that frame's slot
+
+    A slot returned by `pull()` stays valid until the next `push()` of the
+    same slot (i.e. `_RING_DEPTH` frames later); callers copy out immediately.
     """
 
     def __init__(self, width: int, height: int, style: int, intensity: float,
                  local_tone: float, local_struct: float, skin_struct: float,
                  use_auto_mask: bool, log_path: Path | None = None,
                  super_resolution_scale: int = 1, vsr_quality: int = 4):
-        ok, detail = backend_available()
+        ok, detail = backend_available(super_resolution_scale)
         if not ok:
             raise DLSS5Error(detail)
         if int(super_resolution_scale) not in (1, 2, 4):
@@ -88,10 +113,18 @@ class DLSS5Session:
 
         self._input_shape = (self.height, self.width, 4)
         self._output_shape = (self.output_height, self.output_width, 4)
-        self._input_shm = shared_memory.SharedMemory(create=True, size=int(np.prod(self._input_shape)))
-        self._output_shm = shared_memory.SharedMemory(create=True, size=int(np.prod(self._output_shape)))
-        self._input_view = np.ndarray(self._input_shape, dtype=np.uint8, buffer=self._input_shm.buf)
-        self._output_view = np.ndarray(self._output_shape, dtype=np.uint8, buffer=self._output_shm.buf)
+        in_bytes = int(np.prod(self._input_shape))
+        out_bytes = int(np.prod(self._output_shape))
+        self._input_shms = [shared_memory.SharedMemory(create=True, size=in_bytes)
+                            for _ in range(_RING_DEPTH)]
+        self._output_shms = [shared_memory.SharedMemory(create=True, size=out_bytes)
+                             for _ in range(_RING_DEPTH)]
+        self._input_views = [np.ndarray(self._input_shape, dtype=np.uint8, buffer=shm.buf)
+                             for shm in self._input_shms]
+        self._output_views = [np.ndarray(self._output_shape, dtype=np.uint8, buffer=shm.buf)
+                              for shm in self._output_shms]
+        self._head = 0
+        self._pending: deque[int] = deque()
 
         self._request = {
             "op": "init",
@@ -105,8 +138,8 @@ class DLSS5Session:
             "use_auto_mask": bool(use_auto_mask),
             "super_resolution_scale": self.super_resolution_scale,
             "vsr_quality": max(1, min(4, int(vsr_quality))),
-            "input_shm": self._input_shm.name,
-            "output_shm": self._output_shm.name,
+            "input_shm": [shm.name for shm in self._input_shms],
+            "output_shm": [shm.name for shm in self._output_shms],
             "dll_dir": str(_DLL_DIR),
             "log_path": str(self._log_path),
         }
@@ -177,16 +210,36 @@ class DLSS5Session:
     def output_height(self) -> int:
         return self.height * self.super_resolution_scale
 
-    def process(self, rgba) -> "object":
-        """Run one RGBA8 uint8 numpy frame through VSR+Feature 18, return RGBA8."""
-        if rgba.dtype != np.uint8 or rgba.shape != self._input_shape:
-            raise DLSS5Error(f"frame must be uint8 {self._input_shape}, got {rgba.shape}/{rgba.dtype}")
-        # np.copyto keeps the shared buffer authoritative; both sides already
-        # agreed on the layout, so no per-frame metadata is needed.
-        np.copyto(self._input_view, rgba)
-        self._send({"op": "frame", "reset": True})
+    @property
+    def inflight(self) -> int:
+        """Frames handed to the worker whose result has not been pulled yet."""
+        return len(self._pending)
+
+    def next_input(self) -> np.ndarray:
+        """Input buffer for the next frame. The caller must `push()` it."""
+        if len(self._pending) >= _RING_DEPTH:
+            raise DLSS5Error("ring full: pull() an in-flight frame before pushing another")
+        return self._input_views[self._head]
+
+    def push(self, reset: bool = False) -> None:
+        """Hand the frame written into `next_input()` to the worker."""
+        slot = self._head
+        self._send({"op": "frame", "slot": slot, "reset": bool(reset)})
+        self._pending.append(slot)
+        self._head = (self._head + 1) % _RING_DEPTH
+
+    def pull(self) -> np.ndarray:
+        """Block until the oldest in-flight frame is done; return its RGBA8 output."""
+        if not self._pending:
+            raise DLSS5Error("pull() with no frame in flight")
         self._read_event(timeout=300.0)
-        return np.array(self._output_view, dtype=np.uint8, copy=True)
+        return self._output_views[self._pending.popleft()]
+
+    def drain(self) -> None:
+        """Wait out every in-flight frame (used before closing/rebuilding)."""
+        while self._pending:
+            self._read_event(timeout=300.0)
+            self._pending.popleft()
 
     def _send(self, payload: dict) -> None:
         if self._proc is None or self._proc.stdin is None or self._proc.poll() is not None:
@@ -224,17 +277,17 @@ class DLSS5Session:
                     except OSError:
                         pass
         finally:
-            for shm, view in ((self._input_shm, self._input_view), (self._output_shm, self._output_view)):
-                self._input_shm = self._output_shm = None
-                self._input_view = self._output_view = None
-                if shm is None:
-                    continue
-                del view
-                try:
-                    shm.close()
-                except (BufferError, OSError):
-                    pass
-                try:
-                    shm.unlink()
-                except (BufferError, FileNotFoundError, OSError):
-                    pass
+            self._pending.clear()
+            for shms, views in ((self._input_shms, self._input_views),
+                                (self._output_shms, self._output_views)):
+                while shms:
+                    shm, view = shms.pop(), views.pop()
+                    del view
+                    try:
+                        shm.close()
+                    except (BufferError, OSError):
+                        pass
+                    try:
+                        shm.unlink()
+                    except (BufferError, FileNotFoundError, OSError):
+                        pass
