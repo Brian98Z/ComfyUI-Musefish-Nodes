@@ -10,10 +10,14 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+from aiohttp import web
+import folder_paths
 from comfy_api.latest import Input, InputImpl, io
+from PIL import Image
+from server import PromptServer
 
 from .dlss5_backend.session import DLSS5Session, backend_available
-from .musefish_dlss5 import _STYLES, _VSR_QUALITY, _VSR_QUALITY_IDS, _SR_SCALES, _scale_plan
+from .musefish_dlss5 import _STYLES, _VSR_QUALITY, _VSR_QUALITY_IDS, _SR_SCALES, _scale_plan, _stable_render_factor
 
 
 
@@ -56,6 +60,50 @@ def _stop(proc: subprocess.Popen | None) -> None:
             stream.close()
 
 
+def _input_source(filename: str) -> Path | None:
+    if (not filename or filename.startswith(("/", "\\")) or
+            ".." in filename.replace("\\", "/").split("/") or ":" in filename):
+        return None
+    root = Path(folder_paths.get_input_directory()).resolve()
+    source = (root / filename.replace("\\", "/")).resolve()
+    return source if source.is_relative_to(root) else None
+
+
+async def video_dimensions(request: web.Request) -> web.Response:
+    """Probe a Comfy input video without relying on browser codec support."""
+    source = _input_source(request.rel_url.query.get("file", ""))
+    if source is None:
+        return web.Response(status=400)
+    if not source.is_file():
+        return web.Response(status=404)
+    try:
+        _ffmpeg, ffprobe = _binaries()
+        width, height, _fps, _frames = _video_info(ffprobe, source)
+    except (OSError, ValueError, subprocess.SubprocessError, KeyError, json.JSONDecodeError):
+        return web.Response(status=422)
+    return web.json_response({"width": width, "height": height})
+
+
+async def image_dimensions(request: web.Request) -> web.Response:
+    """Probe a LoadImage source without loading the raster into RAM."""
+    source = _input_source(request.rel_url.query.get("file", ""))
+    if source is None:
+        return web.Response(status=400)
+    if not source.is_file():
+        return web.Response(status=404)
+    try:
+        with Image.open(source) as image:
+            width, height = image.size
+    except (OSError, ValueError):
+        return web.Response(status=422)
+    return web.json_response({"width": width, "height": height})
+
+
+if getattr(PromptServer, "instance", None) is not None:
+    PromptServer.instance.routes.get("/musefish/dlss5/video-dimensions")(video_dimensions)
+    PromptServer.instance.routes.get("/musefish/dlss5/image-dimensions")(image_dimensions)
+
+
 class MusefishDLSS5VideoStream(io.ComfyNode):
     """Decode one frame at a time, preserve NGX history, encode one MP4."""
 
@@ -69,9 +117,9 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
                          "Processes the file-backed VIDEO with bounded memory and one "
                          "continuous DLSS5 session; returns VIDEO without an IMAGE batch."),
             inputs=[
-                io.Combo.Input("super_resolution", display_name="放大参数", options=_SR_SCALES,
+                io.Combo.Input("super_resolution", display_name="Upscale", options=_SR_SCALES,
                                default="2× (Balance)",
-                               tooltip="Labels name output scales, not VSR quality. Native 2x/4x VSR; 1.5x/3x use VSR plus downsampling. 4K from 720p uses a 5120x2880 intermediate; 8K requires at least a 1080p source."),
+                               tooltip="Output scale, not VSR quality. Native 2x/4x VSR; 1.5x/3x use VSR plus downsampling. Unavailable scales are hidden when the source resolution is known."),
                 io.Video.Input("video", tooltip="Connect Load Video (file-backed VIDEO)"),
                 io.Combo.Input("style", options=_STYLES, default="default"),
                 io.Combo.Input("vsr_quality", options=_VSR_QUALITY, default="ultra"),
@@ -81,10 +129,10 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
                 io.Float.Input("skin_struct", default=1.0, min=0.0, max=1.0, step=0.01),
                 io.Boolean.Input("use_auto_mask", default=True),
                 io.Int.Input("crf", default=19, min=0, max=51, step=1,
-                             tooltip="Quality for libx264 only; h264_nvenc uses fixed CQ 27."),
+                             tooltip="Quality for CPU encoding (H.264 under 4K, HEVC above 4096px); GPU NVENC uses fixed CQ 27."),
                 io.Combo.Input("encoder", options=["libx264（CPU 编码）", "h264_nvenc（GPU 编码加速）"],
                                default="libx264（CPU 编码）",
-                               tooltip="GPU NVENC can reduce CPU load; CQ 27 differs from x264 CRF quality."),
+                               tooltip="At widths/heights above 4096px both CPU and GPU modes use HEVC; GPU NVENC uses fixed CQ 27."),
             ],
             outputs=[io.Video.Output("video")],
             is_output_node=True,
@@ -119,7 +167,11 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
         if total_frames <= 0:
             raise ValueError("Could not determine video frame count for progress")
         factor, out_w, out_h = _scale_plan(super_resolution, width, height)
-        ok, detail = backend_available(factor)
+        # Feature 18 at a full 8K render develops strong color/noise artifacts.
+        # Keep neural rendering at <=4K for 8K exports, then enlarge the
+        # enhanced result; VSR/NGX never sees an unstable 8K surface.
+        render_factor = _stable_render_factor(super_resolution, width, height, factor, out_w, out_h)
+        ok, detail = backend_available(render_factor)
         if not ok:
             raise RuntimeError(f"DLSS5 backend unavailable: {detail}")
         progress = comfy.utils.ProgressBar(total_frames)
@@ -134,6 +186,8 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
         frame_bytes = width * height * 3
         raw = bytearray(frame_bytes)
         output_rgb = np.empty((out_h, out_w, 3), dtype=np.uint8)
+        render_rgb = (np.empty((height * render_factor, width * render_factor, 3), dtype=np.uint8)
+                      if (height * render_factor, width * render_factor) != (out_h, out_w) else output_rgb)
         try:
             # Rawvideo from stdout enforces backpressure: no decoded batch exists.
             decoder = subprocess.Popen(
@@ -152,8 +206,8 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
                 if codec == "h264_nvenc":
                     codec = "hevc_nvenc"  # NVENC H.264 is limited to 4096px on this GPU
                 elif codec == "libx264":
-                    raise ValueError("8K requires GPU encoding: select h264_nvenc (uses HEVC at 8K)")
-            video_codec = (["-c:v", "libx264", "-crf", str(crf)] if codec == "libx264" else
+                    codec = "libx265"  # H.264 cannot encode an 8K frame
+            video_codec = (["-c:v", codec, "-crf", str(crf)] if codec.startswith("libx") else
                            ["-c:v", codec, "-preset", "p5", "-rc", "vbr",
                             "-cq", "27", "-b:v", "0"])
             encoder_proc = subprocess.Popen(
@@ -161,7 +215,7 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
                  "-s", f"{out_w}x{out_h}", "-r", str(fps), "-i", "-",
                  *trim_start, *trim_duration, "-i", str(source), "-map", "0:v:0", "-map", "1:a:0?",
                  *video_codec, "-pix_fmt", "yuv420p",
-                 "-c:a", "aac", "-b:a", "192k", "-tag:v", "hvc1" if codec == "hevc_nvenc" else "avc1", "-movflags", "+faststart",
+                 "-c:a", "aac", "-b:a", "192k", "-tag:v", "hvc1" if codec in ("hevc_nvenc", "libx265") else "avc1", "-movflags", "+faststart",
                  "-f", "mp4", str(partial)],
                 stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             )
@@ -169,7 +223,7 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
                 width, height, style=_STYLES.index(style), intensity=intensity,
                 local_tone=local_tone, local_struct=local_struct,
                 skin_struct=skin_struct, use_auto_mask=use_auto_mask,
-                super_resolution_scale=factor,
+                super_resolution_scale=render_factor,
                 vsr_quality=_VSR_QUALITY_IDS[vsr_quality],
             )
             count = 0
@@ -178,9 +232,11 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
             def consume() -> None:
                 nonlocal completed
                 enhanced = session.pull()
-                if enhanced.shape[:2] != (out_h, out_w):
-                    enhanced = cv2.resize(enhanced, (out_w, out_h), interpolation=cv2.INTER_AREA)
-                cv2.cvtColor(enhanced, cv2.COLOR_RGBA2RGB, dst=output_rgb)
+                cv2.cvtColor(enhanced, cv2.COLOR_RGBA2RGB, dst=render_rgb)
+                if render_rgb is not output_rgb:
+                    interpolation = (cv2.INTER_AREA if render_rgb.shape[0] > out_h or render_rgb.shape[1] > out_w
+                                     else cv2.INTER_CUBIC)
+                    cv2.resize(render_rgb, (out_w, out_h), dst=output_rgb, interpolation=interpolation)
                 encoder_proc.stdin.write(memoryview(output_rgb).cast("B"))
                 completed += 1
                 progress.update_absolute(min(completed, total_frames - 1))

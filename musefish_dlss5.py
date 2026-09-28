@@ -66,6 +66,13 @@ def _scale_plan(mode: str, width: int, height: int) -> tuple[int, int, int]:
         raise ValueError(f"{mode} needs a {width * factor}x{height * factor} VSR intermediate above the 7680x4320 limit")
     return factor, out_w, out_h
 
+def _stable_render_factor(mode: str, width: int, height: int,
+                          factor: int, out_w: int, out_h: int) -> int:
+    """Keep Feature 18 at <=4K for an 8K output; resize after enhancement."""
+    if (mode == "8K" or out_w * out_h >= _MAX_VSR_PIXELS) and factor > 1:
+        return 2 if width * height * 4 <= 3840 * 2160 else 1
+    return factor
+
 def _is_session_error(error: BaseException) -> bool:
     return isinstance(error, DLSS5Error)
 
@@ -190,8 +197,8 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
                 "RTX 50-series (Blackwell) ONLY."
             ),
             inputs=[
-                io.Combo.Input("super_resolution", display_name="放大参数", options=_SR_SCALES,
-                               default="off", tooltip="Output scale, not VSR quality. 1.5× and 3× combine VSR with downsampling; IMAGE batches at 8K require substantial RAM."),
+                io.Combo.Input("super_resolution", display_name="Upscale", options=_SR_SCALES,
+                               default="off", tooltip="Output scale, not VSR quality. 1.5× and 3× combine VSR with downsampling; 8K enhances at <=4K first, and IMAGE batches at 8K require substantial RAM."),
                 io.Image.Input("images"),
                 io.Combo.Input("style", options=_STYLES, default="default",
                                tooltip="0 default / 1 natural / 2 cinema — same mapping as DLSS5Tool"),
@@ -252,8 +259,9 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
         if frame_count == 0:
             return io.NodeOutput(images)
         vsr_factor, out_w, out_h = _scale_plan(super_resolution, width, height)
+        render_factor = _stable_render_factor(super_resolution, width, height, vsr_factor, out_w, out_h)
         vsr_quality_id = _VSR_QUALITY_IDS.get(vsr_quality, 4)
-        ok, detail = backend_available(vsr_factor)
+        ok, detail = backend_available(render_factor)
         if not ok:
             raise RuntimeError(f"DLSS5 backend unavailable: {detail}")
 
@@ -283,7 +291,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
             _SESSION_CACHE.reap_idle()
             sessions = _SESSION_CACHE.acquire(
                 width, height, _STYLES.index(style), intensity, local_tone,
-                local_struct, skin_struct, use_auto_mask, vsr_factor,
+                local_struct, skin_struct, use_auto_mask, render_factor,
                 vsr_quality_id, pool_size,
             )
             if sessions is not None:
@@ -303,7 +311,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
                             local_struct=float(local_struct),
                             skin_struct=float(skin_struct),
                             use_auto_mask=bool(use_auto_mask),
-                            super_resolution_scale=vsr_factor,
+                            super_resolution_scale=render_factor,
                             vsr_quality=vsr_quality_id,
                         ))
                     except DLSS5Error:
@@ -316,14 +324,16 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
                     session.close()
                 raise
 
-        def _consume(session: DLSS5Session, index: int, slot: int, output_rgb: np.ndarray) -> None:
+        def _consume(session: DLSS5Session, index: int, slot: int, output_rgb: np.ndarray,
+                     render_rgb: np.ndarray) -> None:
             """Claim the engine result for `index` and write the output slice."""
             enhanced = session.pull()
-            if enhanced.shape[:2] != (out_h, out_w):
-                enhanced = cv2.resize(enhanced, (out_w, out_h), interpolation=cv2.INTER_AREA)
-            # Compact RGBA to RGB before scaling; the strided NumPy cast is
-            # substantially slower than an OpenCV channel copy plus dense cast.
-            cv2.cvtColor(enhanced, cv2.COLOR_RGBA2RGB, dst=output_rgb)
+            # Compact the engine RGBA result once, before any final resizing.
+            cv2.cvtColor(enhanced, cv2.COLOR_RGBA2RGB, dst=render_rgb)
+            if render_rgb is not output_rgb:
+                interpolation = (cv2.INTER_AREA if render_rgb.shape[0] > out_h or render_rgb.shape[1] > out_w
+                                 else cv2.INTER_CUBIC)
+                cv2.resize(render_rgb, (out_w, out_h), dst=output_rgb, interpolation=interpolation)
             np.divide(output_rgb, scale, out=out_tensor[index].numpy(), dtype=np.float32)
             counts[slot] += 1
             cls._check_cancel()
@@ -333,6 +343,8 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
             """Drive one contiguous frame block through one worker."""
             awaiting: deque[int] = deque()
             output_rgb = np.empty((out_h, out_w, 3), dtype=np.uint8)
+            render_rgb = (np.empty((height * render_factor, width * render_factor, 3), dtype=np.uint8)
+                          if (height * render_factor, width * render_factor) != (out_h, out_w) else output_rgb)
             rgb = np.empty((height, width, 3), dtype=np.float32)
             rgb8 = np.empty((height, width, 3), dtype=np.uint8)
             alpha = np.empty((height, width), dtype=np.float32) if has_alpha else None
@@ -340,7 +352,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
                 # Keep the ring 2 deep: claim the oldest result before handing
                 # over another frame, which also frees the slot it occupied.
                 if session.inflight >= 2:
-                    _consume(session, awaiting.popleft(), slot, output_rgb)
+                    _consume(session, awaiting.popleft(), slot, output_rgb, render_rgb)
                 # A block always opens with a history reset, so a cached session
                 # never leaks history into this run; reset_every adds in-place
                 # resets on top (reset_every_n_frames=1 => independent frames).
@@ -360,7 +372,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
                 session.push(reset)
                 awaiting.append(index)
             while awaiting:
-                _consume(session, awaiting.popleft(), slot, output_rgb)
+                _consume(session, awaiting.popleft(), slot, output_rgb, render_rgb)
 
         def _guarded(session: DLSS5Session, lo: int, hi: int, slot: int,
                      errors: list[BaseException]) -> None:
@@ -398,7 +410,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
             if keep_session == "auto":
                 _SESSION_CACHE.release(sessions, width, height, _STYLES.index(style),
                                        intensity, local_tone, local_struct, skin_struct,
-                                       use_auto_mask, vsr_factor, vsr_quality_id, pool_size)
+                                       use_auto_mask, render_factor, vsr_quality_id, pool_size)
                 sessions = None
         except BaseException:  # includes interruption; never cache a failed pool
             _SESSION_CACHE.invalidate()

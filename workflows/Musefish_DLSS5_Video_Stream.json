@@ -1,0 +1,73 @@
+{
+  "id": "9f2a1c30-dlss5-stream-0001",
+  "revision": 0,
+  "last_node_id": 3,
+  "last_link_id": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "LoadVideo",
+      "pos": [60, 220],
+      "size": [320, 170],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [{"name": "file", "type": "COMBO", "widget": {"name": "file"}, "link": null}, {"name": "upload", "type": "IMAGEUPLOAD", "widget": {"name": "upload"}, "link": null}],
+      "outputs": [{"name": "VIDEO", "type": "VIDEO", "links": [1]}],
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "LoadVideo"},
+      "widgets_values": ["video-2.mp4", "image"],
+      "widgets_values_named": {"file": "video-2.mp4", "upload": "image"}
+    },
+    {
+      "id": 2,
+      "type": "MusefishDLSS5VideoStream",
+      "pos": [470, 200],
+      "size": [340, 290],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {"name": "super_resolution", "localized_name": "Upscale", "type": "COMBO", "widget": {"name": "super_resolution"}, "link": null},
+        {"name": "video", "type": "VIDEO", "link": 1},
+        {"name": "style", "type": "COMBO", "widget": {"name": "style"}, "link": null},
+        {"name": "vsr_quality", "type": "COMBO", "widget": {"name": "vsr_quality"}, "link": null},
+        {"name": "intensity", "type": "FLOAT", "widget": {"name": "intensity"}, "link": null},
+        {"name": "local_tone", "type": "FLOAT", "widget": {"name": "local_tone"}, "link": null},
+        {"name": "local_struct", "type": "FLOAT", "widget": {"name": "local_struct"}, "link": null},
+        {"name": "skin_struct", "type": "FLOAT", "widget": {"name": "skin_struct"}, "link": null},
+        {"name": "use_auto_mask", "type": "BOOLEAN", "widget": {"name": "use_auto_mask"}, "link": null},
+        {"name": "crf", "type": "INT", "widget": {"name": "crf"}, "link": null},
+        {"name": "encoder", "type": "COMBO", "widget": {"name": "encoder"}, "link": null}
+      ],
+      "outputs": [{"name": "video", "type": "VIDEO", "links": [2]}],
+      "properties": {"aux_id": "Brian98Z/ComfyUI-Musefish-Nodes", "Node name for S&R": "MusefishDLSS5VideoStream"},
+      "widgets_values": ["2× (Balance)", "default", "ultra", 1, 0.94, 0.84, 1, true, 19, "libx264（CPU 编码）"],
+      "widgets_values_named": {"super_resolution": "2× (Balance)", "style": "default", "vsr_quality": "ultra", "intensity": 1, "local_tone": 0.94, "local_struct": 0.84, "skin_struct": 1, "use_auto_mask": true, "crf": 19, "encoder": "libx264（CPU 编码）"}
+    },
+    {
+      "id": 3,
+      "type": "SaveVideo",
+      "pos": [900, 220],
+      "size": [320, 210],
+      "flags": {},
+      "order": 2,
+      "mode": 0,
+      "inputs": [
+        {"name": "video", "type": "VIDEO", "link": 2},
+        {"name": "filename_prefix", "type": "STRING", "widget": {"name": "filename_prefix"}, "link": null},
+        {"name": "format", "type": "COMFY_DYNAMICCOMBO_V3", "widget": {"name": "format"}, "link": null},
+        {"name": "format.codec", "type": "COMFY_DYNAMICCOMBO_V3", "widget": {"name": "format.codec"}, "link": null},
+        {"name": "codec", "shape": 7, "type": "COMFY_DYNAMICCOMBO_V3", "widget": {"name": "codec"}, "link": null}
+      ],
+      "outputs": [{"name": "video", "type": "VIDEO", "links": null}],
+      "properties": {"cnr_id": "comfy-core", "Node name for S&R": "SaveVideo"},
+      "widgets_values": ["Musefish/DLSS5", "mp4", "auto", "auto"],
+      "widgets_values_named": {"filename_prefix": "Musefish/DLSS5", "format": "mp4", "format.codec": "auto", "codec": "auto"}
+    }
+  ],
+  "links": [[1, 1, 0, 2, 1, "VIDEO"], [2, 2, 0, 3, 0, "VIDEO"]],
+  "groups": [],
+  "config": {},
+  "extra": {"ds": {"scale": 0.9, "offset": [100, 100]}, "musefish_template": {"usage": "Select your input file in LoadVideo before running. The stream node keeps a single DLSS5 session and preserves audio. For 8K select 8K and choose CPU or GPU encoding; both switch to HEVC above 4096 pixels. RTX 50-series required."}},
+  "version": 0.4
+}

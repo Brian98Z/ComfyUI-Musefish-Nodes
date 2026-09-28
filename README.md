@@ -332,17 +332,24 @@ decode VAE:
   （1472×1280@24fps，10 秒，2× RTX VSR + Feature 18 实测输出）。
 - **高清长视频**：`LoadVideo → MusefishDLSS5VideoStream → SaveVideo` 均使用
   VIDEO 类型；内部连续解码、增强、编码和音频封装，SaveVideo 输出成片。
-  不积累整批 IMAGE，不需手动拼接。旧分段模板仅供历史兼容。
-  内层编码默认 `libx264`；可选 `h264_nvenc` 降低 CPU 编码开销（固定 CQ 27，
-  与 `crf` 不是同一画质刻度）。中间文件名自动生成，最终名称在 SaveVideo 设置。
+  不积累整批 IMAGE，不需手动拼接。当前模板：
+  [Musefish_DLSS5_Video_Stream.json](workflows/Musefish_DLSS5_Video_Stream.json)。
+  内层编码默认 CPU H.264（`libx264`），可选 GPU `h264_nvenc` 降低 CPU 编码
+  开销（固定 CQ 27，与 `crf` 不是同一画质刻度）；输出宽或高超过 4096 时
+  分别自动切换 CPU `libx265` 或 GPU `hevc_nvenc`。中间文件名自动生成，
+  最终名称在 SaveVideo 设置。
   若接 `Video Slice`，节点会按裁剪的起点与时长处理视频和音频，
   不会再把原片全长送入 DLSS5。
-  两节点的「放大参数」均提供 1× (Native)、1.5× (Quality)、2× (Balance)、
-  3× (Performance)、4× (Ultra) 与 1K–8K 目标档；第三个控件 `vsr_quality`
-  才控制实际 VSR 质量。1.5×/3× 为 VSR 合成缩放，不是原生倍率。
-  横竖屏均按短边选 K 档：720p→4K 采用 5120×2880 中间帧后输出 3840×2160；
-  1080p→8K 输出 7680×4320（竖屏为 4320×7680），需 GPU 编码并自动使用
-  HEVC NVENC。720p 无法用至多 4× VSR 达到 8K。
+  VIDEO 与 IMAGE 节点的 `Upscale` 控件均提供 1× (Native)、1.5× (Quality)、
+  2× (Balance)、3× (Performance)、4× (Ultra) 与 1K–8K 目标档。VIDEO 连接
+  LoadVideo（可经过 Video Slice），或 IMAGE 直接连接 LoadImage 时，控件按
+  源分辨率隐藏不可用档位；生成图片等未知尺寸来源仍显示完整选项。
+  第三个控件 `vsr_quality` 才控制实际 VSR 质量。
+  1.5×/3× 为 VSR 合成缩放；横竖屏均按短边选 K 档。720p→4K 输出
+  3840×2160；1080p→8K 输出 7680×4320（竖屏为 4320×7680），
+  VIDEO 的 CPU/GPU 编码均自动改为 HEVC；VIDEO 与 IMAGE 的 8K 输出都先在
+  ≤4K 画面完成神经增强再放大，避免直接 8K 神经渲染的偏色和背景噪点。
+  IMAGE 没有视频编码选项，整批 float32 输出超过 1 GiB 会拒绝；720p 无法达到 8K。
   四个外部 DLL 放在 `ComfyUI/models/dlss5/`；用户提供的下载分享为
   <https://pan.quark.cn/s/d4c04dc33d25>（非 NVIDIA 官方发行）。文件清单与
   其他依赖见 [DLSS5_README.md](DLSS5_README.md)。
@@ -499,6 +506,14 @@ MusefishUniverSRModel（speech）── model_cache ─→ ↑
 - [Musefish_UniverSR_Audio.json](workflows/Musefish_UniverSR_Audio.json)：音乐/语音双分支参考模板，分别连接模型缓存、音频保存和日志展示节点。
 
 ## 更新日志
+
+### v1.5.0（2026-09-28）
+
+- VIDEO/IMAGE 两节点的放大标题均为 `Upscale`；VIDEO 按 LoadVideo（含 Video Slice）、IMAGE 直连 LoadImage 的源分辨率隐藏不可用档位。后端 ffprobe 读取视频尺寸，HEVC 视频也可过滤；未知源显示完整选项。
+- VIDEO 和 IMAGE 的 8K 输出均在不超过 4K 的中间图完成 DLSS5 神经增强，再插值放大到目标尺寸，规避直接 8K 神经渲染的偏色与背景噪点；IMAGE 单帧 7680×4320 已验证。
+- 8K 视频选择 `libx264（CPU 编码）` 时自动改用 CPU libx265/HEVC，而不是报错；两帧 4320×7680 HEVC 流式出片已验证。
+- 将旧的 VHS 手动分段 DLSS5 模板替换为 `LoadVideo → MusefishDLSS5VideoStream → SaveVideo`，默认 2× + CPU 编码；其余模板保持原有节点链路。
+- 同一段 1080P、22 秒视频放大到 8K：用户实测 GPU HEVC 79 秒、CPU HEVC 300 秒；CPU 约为 GPU 的 3.8 倍用时。该数字为用户提供的整链路对照，不保证其他片源或设备同速。
 
 ### v1.4.0（2026-09-25）
 

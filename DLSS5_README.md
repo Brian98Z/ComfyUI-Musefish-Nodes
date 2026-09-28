@@ -19,7 +19,7 @@
 - `dlss5_backend/session.py` — 会话管理（子进程生命周期、共享内存帧协议）
 - `dlss5_backend/worker.py` — 子进程入口（ctypes 驱动 DLL + 共享内存 pinned 注册）
 - `models/dlss5/` — ComfyUI 的模型目录（可以由 `--models-directory` 指定），存放四个外部 DLL；不随插件分发
-- `workflows/Musefish_DLSS5_Video_Segments.json` — 长视频分段增强案例工作流
+- `workflows/Musefish_DLSS5_Video_Stream.json` — LoadVideo → 流式 DLSS5 → SaveVideo 案例工作流
 
 ## 运行依赖与手动部署（Windows）
 
@@ -113,7 +113,7 @@ ComfyUI 主进程                           worker 子进程（每个 1 个）
 | skin_struct (0–1) | 皮肤蒙版强度 |
 | use_auto_mask | 皮肤蒙版开关 |
 | reset_every_n_frames (0=never) | 时序历史重置（0 为单会话连续；1 为逐帧独立，等同旧版行为） |
-| `放大参数`（IMAGE 和 VIDEO；输入 ID `super_resolution`） | 首个控件：`off`、`1× (Native)`、`1.5× (Quality)`、`2× (Balance)`、`3× (Performance)`、`4× (Ultra)`、`1K`、`2K`、`4K`、`8K`。1× 不放大，2×/4× 是 VSR 原生整数倍率；1.5×/3× 由 2×/4× VSR 后 `INTER_AREA` 缩小合成。标签中的 Quality/Balance/Performance/Ultra 是输出档名，不会覆盖第三个控件 `vsr_quality`。K 档按短边目标 1080/1440/2160/4320 挑选可达的最小倍率，横屏与竖屏均支持：1K 可输出 1920×1080 或 1080×1920（取决于输入方向与比例）。输出和 VSR 中间图均不超过 7680×4320 的像素预算；720p→4K 采用 4× 5120×2880 中间图后缩至 3840×2160；1080p→8K 采用 4×，720p→8K 因需超过 4× 会明确拒绝。IMAGE 输出是整个 float32 批次，超过 1 GiB 时拒绝并建议使用流式 VIDEO。 |
+| `Upscale`（IMAGE/VIDEO；输入 ID `super_resolution`） | 首个控件：`off`、`1× (Native)`、`1.5× (Quality)`、`2× (Balance)`、`3× (Performance)`、`4× (Ultra)`、`1K`、`2K`、`4K`、`8K`。VIDEO 连接 Load Video（可经过 Video Slice）后由 ffprobe 读取分辨率；IMAGE 直接连接 LoadImage 时读取图片分辨率；两者在已知源尺寸时均隐藏超出输出/中间图限制的倍率。其他 IMAGE 生成/处理来源无法在执行前确定尺寸，显示完整列表，运行时仍校验。1× 不放大，2×/4× 原生 VSR；1.5×/3× 由 2×/4× VSR 缩小合成。K 档按短边目标 1080/1440/2160/4320 选最小可达倍率，输出及 VSR 中间图均受 7680×4320 像素预算限制。720p→4K 用 5120×2880 VSR 中间图缩至 3840×2160；1080p→8K 的 VIDEO 和 IMAGE 均先在不超过 4K 的画面神经增强，再插值放大至 8K，避免直接 8K Feature 18 偏色/噪点。IMAGE 为整批 float32 输出，超过 1 GiB 拒绝并建议 VIDEO。 |
 | vsr_quality: performance/balanced/quality/ultra | VSR 质量档（NGX PerfQuality 1–4；ultra 为 DLSS5Tool 默认） |
 | keep_session: auto/off | auto 在同一任务连续分批期间复用热 worker，任务结束或中断后约 2–3 秒关闭并释放其显存；off 每次节点执行后立即关闭 |
 | parallel_workers | IMAGE 节点已移除控件并固定 1 路，长视频使用流式节点 |
@@ -196,17 +196,26 @@ output。一次运行只保持一个 NGX 会话、两个 RGBA8 共享内存槽�
 缓冲；无 900 帧 IMAGE 批次，也不用手动拼接。时序历史从首帧到末帧连续。
 中间临时名固定为 `Musefish/DLSS5_stream_<随机值>.mp4`，不暴露前缀控件；
 最终成片名称只在 SaveVideo 的 `filename_prefix` 设置。
-原音频转 AAC；低于 8K 使用 H.264，`libx264` 的 CRF 默认 19（可调）。
+原音频转 AAC；宽和高均不超过 4096 时使用 H.264，CPU 模式 CRF 默认 19（可调）。
 失败或中断时清理未完成 `.part.mp4` 并关闭子进程及 worker。
-`encoder` 默认 `libx264`，`crf` 仅控制此模式。可选 `h264_nvenc` 用 GPU 的
-NVENC 编码器，固定 CQ 27（并非与 CRF 19 等画质）；在 1280×720@30fps
-输入、2× 超分、连续 60 秒（1800 帧）的本机对照中，整链路耗时
-74.1s → 65.1s，内层 MP4 大小 95.5MB → 99.1MB。
-在本机 GPU 上 H.264 NVENC 宽度超过 4096 会失败；选择 GPU 编码时，
-8K 横屏或竖屏自动切换 HEVC NVENC（MP4 `hvc1` 标记，CQ 27）。
-`libx264` 不支持本节点的 8K 输出，选择 8K 时需选择 GPU 编码。
+`encoder` 默认 `libx264（CPU 编码）`，输出宽/高超过 4096 时自动采用 CPU
+`libx265`（HEVC）；`crf` 控制这两种 CPU 编码。可选 `h264_nvenc（GPU 编码加速）`，
+GPU 模式固定 CQ 27（并非与 CRF 19 等画质）；在 1280×720@30fps 输入、
+2× 超分、连续 60 秒（1800 帧）的本机对照中，整链路耗时 74.1s → 65.1s，
+内层 MP4 大小 95.5MB → 99.1MB。
+本机 H.264 NVENC 宽度超过 4096 会失败；GPU 模式输出宽/高超过 4096
+时自动切换 HEVC NVENC（MP4 `hvc1`，CQ 27）。CPU 模式同样可输出 8K，
+自动切换 HEVC libx265（MP4 `hvc1`，按 `crf` 控制画质），但速度取决于处理器。
+同一段 1080P、22 秒视频放大至 8K，用户实测 GPU HEVC 用时 79 秒，
+CPU HEVC 用时 300 秒（约 3.8 倍）；这组数据是用户提供的整链路测试结果，
+不是上述 720p/2× 基准，其他素材与硬件的速度不能由此推断。
 已验证 720p→4K 为 3840×2160、1080p→8K 横屏为 7680×4320、
-1080p→8K 竖屏为 4320×7680，均含 AAC 音轨。
+1080p→8K 竖屏为 4320×7680，均含 AAC 音轨。原来的 8K 神经渲染
+在实片中出现偏色及背景噪点；VIDEO 流式节点改在不高于 4K 的中间画面
+进行神经增强，最后使用插值放大到 8K。8K 文件分辨率不等于 8K 原生神经渲染细节。
+IMAGE 节点的 8K 档同样采用不高于 4K 的神经增强中间画面，再插值放大；
+无视频编码器，因此不受 CPU/GPU 编码选项影响。8K 张量占用较多主存，
+输出超过 1 GiB 的 IMAGE 批次仍会被拒绝。
 其他片源的画质和速度需自行比较；NGX 是单会话时序处理，不能仅凭显存空闲
 增加并发而保持同等时序结果。
 本机测试视频的名义 30fps 与平均帧率有细微差异，流式处理沿用名义帧率，
@@ -217,8 +226,8 @@ NVENC 编码器，固定 CQ 27（并非与 CRF 19 等画质）；在 1280×720@3
 处理进度通过 ComfyUI 原生进度事件发送，按已写入编码器的帧数计算；
 封装和验证完成前最多显示 99%，成功落盘后才显示 100%。
 前端显示的进度是该节点的帧处理进度，不包含下游 SaveVideo。
-`workflows/Musefish_DLSS5_Video_Segments.json` 是历史手动分段示例，
-不再是长视频推荐路径。
+`workflows/Musefish_DLSS5_Video_Stream.json` 是当前推荐模板，默认 2×/CPU 编码；
+将 LoadVideo 的示例文件替换为自己的输入，8K 可切换 CPU 或 GPU 编码（自动 HEVC）。
 
 ## 适用范围与案例
 

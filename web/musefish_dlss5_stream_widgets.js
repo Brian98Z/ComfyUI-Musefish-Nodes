@@ -53,6 +53,127 @@ function migrate(node) {
   if (!isImage) node.inputs = node.inputs?.filter((input) => input.name !== "filename_prefix");
 }
 
+const SCALE_OPTIONS = ["off", "1× (Native)", "1.5× (Quality)", "2× (Balance)",
+  "3× (Performance)", "4× (Ultra)", "1K", "2K", "4K", "8K"];
+const SCALE_SHORT_EDGES = { "1K": 1080, "2K": 1440, "4K": 2160, "8K": 4320 };
+const SCALE_FACTORS = { "off": 1, "1× (Native)": 1, "1.5× (Quality)": 1.5,
+  "2× (Balance)": 2, "3× (Performance)": 3, "4× (Ultra)": 4 };
+const MAX_PIXELS = 7680 * 4320;
+
+function roundTiesToEven(value) {
+  const floor = Math.floor(value);
+  const fraction = value - floor;
+  if (fraction < 0.5) return floor;
+  if (fraction > 0.5) return floor + 1;
+  return floor % 2 === 0 ? floor : floor + 1;
+}
+
+function scaleIsValid(mode, width, height) {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width <= 0 || height <= 0) return false;
+  const bucket = SCALE_SHORT_EDGES[mode];
+  const candidates = bucket ? [1, 1.5, 2, 3, 4] :
+    Object.hasOwn(SCALE_FACTORS, mode) ? [SCALE_FACTORS[mode]] : [];
+  return candidates.some((scale) => {
+    const outWidth = roundTiesToEven(width * scale / 2) * 2;
+    const outHeight = roundTiesToEven(height * scale / 2) * 2;
+    const factor = scale === 1 ? 1 : scale <= 2 ? 2 : 4;
+    return outWidth * outHeight <= MAX_PIXELS && width * height * factor * factor <= MAX_PIXELS &&
+      (bucket === undefined || Math.min(outWidth, outHeight) >= bucket);
+  });
+}
+
+function connectedLoadVideo(node) {
+  let current = node;
+  const visited = new Set();
+  while (current && !visited.has(current.id)) {
+    visited.add(current.id);
+    const input = current.inputs?.find((entry) => entry.name === "video");
+    if (input?.link == null) return null;
+    const link = current.graph?.links?.[input.link];
+    current = link && current.graph?.getNodeById?.(link.origin_id);
+    if (current?.type === "LoadVideo") {
+      const file = current.widgets?.find((entry) => entry.name === "file")?.value;
+      return typeof file === "string" && file ? { source: current, file } : null;
+    }
+    if (current?.type !== "Video Slice") return null;
+  }
+  return null;
+}
+function connectedLoadImage(node) {
+  const linkId = node.inputs?.find((entry) => entry.name === "images")?.link;
+  const link = linkId == null ? null : node.graph?.links?.[linkId];
+  const source = link && node.graph?.getNodeById?.(link.origin_id);
+  const file = source?.type === "LoadImage" ? source.widgets?.find((entry) => entry.name === "image")?.value : null;
+  return typeof file === "string" && file ? { source, file } : null;
+}
+
+async function sourceDimensions(file, type) {
+  const query = new URLSearchParams({ file });
+  const response = await fetch(`/musefish/dlss5/${type}-dimensions?${query.toString()}`);
+  if (!response.ok) throw new Error(`Cannot probe ${type} dimensions: ${response.status}`);
+  const { width, height } = await response.json();
+  return [width, height];
+}
+
+function updateScaleOptions(node) {
+  const widget = node.widgets?.find((entry) => entry.name === "super_resolution");
+  if (!widget?.options) return;
+  const connectedSource = node.type === IMAGE_TYPE ? connectedLoadImage : connectedLoadVideo;
+  const connected = connectedSource(node);
+  const generation = (node._musefishScaleGeneration || 0) + 1;
+  node._musefishScaleGeneration = generation;
+  if (!connected) {
+    widget.options.values = [...SCALE_OPTIONS];
+    return;
+  }
+  sourceDimensions(connected.file, node.type === IMAGE_TYPE ? "image" : "video").then(([width, height]) => {
+    if (node._musefishScaleGeneration !== generation || connectedSource(node)?.file !== connected.file) return;
+    const values = SCALE_OPTIONS.filter((mode) => scaleIsValid(mode, width, height));
+    if (values.length === 0) {
+      widget.options.values = [...SCALE_OPTIONS];
+      return;
+    }
+    widget.options.values = values;
+    if (!values.includes(widget.value)) {
+      widget.value = values.includes("off") ? "off" : values[0];
+      widget.callback?.(widget.value, app.canvas, node, widget);
+    }
+    node.graph?.setDirtyCanvas?.(true, true);
+  }).catch(() => {
+    // Unknown/unreadable metadata keeps the complete schema option set available.
+    if (node._musefishScaleGeneration === generation) widget.options.values = [...SCALE_OPTIONS];
+  });
+}
+
+function refreshScaleWidgets(graph) {
+  for (const candidate of graph?._nodes ?? []) {
+    if (candidate.type === STREAM_TYPE || candidate.type === IMAGE_TYPE) updateScaleOptions(candidate);
+  }
+}
+
+function watchVideoConnections(node) {
+  if (node._musefishScaleConnectionWatcher) return;
+  node._musefishScaleConnectionWatcher = true;
+  const original = node.onConnectionsChange;
+  node.onConnectionsChange = function (...args) {
+    const result = original?.apply(this, args);
+    refreshScaleWidgets(node.graph);
+    return result;
+  };
+}
+
+function watchSourceFile(node, name) {
+  const widget = node.widgets?.find((entry) => entry.name === name);
+  if (!widget || widget._musefishScaleWatcher) return;
+  widget._musefishScaleWatcher = true;
+  const callback = widget.callback;
+  widget.callback = function (...args) {
+    const result = callback?.apply(this, args);
+    refreshScaleWidgets(node.graph);
+    return result;
+  };
+}
+
 app.registerExtension({
   name: "Musefish.DLSS5StreamWidgets",
   beforeConfigureGraph(graphData) {
@@ -60,5 +181,25 @@ app.registerExtension({
     for (const graph of Object.values(graphData?.definitions?.subgraphs ?? {})) {
       for (const node of graph?.nodes ?? []) migrate(node);
     }
+  },
+  nodeCreated(node) {
+    if (node.type === "LoadVideo") watchSourceFile(node, "file");
+    if (node.type === "LoadImage") watchSourceFile(node, "image");
+    if (node.type === "Video Slice") watchVideoConnections(node);
+    if (node.type === STREAM_TYPE || node.type === IMAGE_TYPE) {
+      const original = node.onConnectionsChange;
+      node.onConnectionsChange = function (...args) {
+        const result = original?.apply(this, args);
+        updateScaleOptions(this);
+        return result;
+      };
+      requestAnimationFrame(() => updateScaleOptions(node));
+    }
+  },
+  loadedGraphNode(node) {
+    if (node.type === "LoadVideo") watchSourceFile(node, "file");
+    if (node.type === "LoadImage") watchSourceFile(node, "image");
+    if (node.type === "Video Slice") watchVideoConnections(node);
+    if (node.type === STREAM_TYPE || node.type === IMAGE_TYPE) requestAnimationFrame(() => updateScaleOptions(node));
   },
 });
