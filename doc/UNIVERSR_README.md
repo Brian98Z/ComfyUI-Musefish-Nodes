@@ -21,7 +21,7 @@ worker 使用启动 ComfyUI 的 `sys.executable`，支持 Python 3.10–3.13 的
 
 ### 音频示例工作流
 
-示例文件：[Musefish_UniverSR_Audio.json](workflows/Musefish_UniverSR_Audio.json)，工作流 ID：`6e417a01-39fa-461d-9f27-484c97aeef2e`。这是 **16GB 显存参考模板**，包含音乐与语音两条独立分支，不是把同一段音频先后送入两个模型。
+示例文件：[Musefish_UniverSR_Audio.json](../workflows/Musefish_UniverSR_Audio.json)，工作流 ID：`6e417a01-39fa-461d-9f27-484c97aeef2e`。这是 **16GB 显存参考模板**，包含音乐与语音两条独立分支，不是把同一段音频先后送入两个模型。
 
 ```text
 音乐分支（默认启用）
@@ -147,4 +147,4 @@ MusefishUniverSRModel（speech）── model_cache ─→ ↑
 - `audio_backend/processing.py`：自动带宽检测与 general 校正、分块超分、四种模式的链路与收口。
 - `audio_backend/dsp.py`：母带及音频后处理（EQ / 多段压 / 去齿音 / 高频整形 / 限幅 / 带宽清理 / 侧声道去相关）。
 - `audio_backend/worker.py`：独立处理进程入口。
-- [Musefish_UniverSR_Audio.json](workflows/Musefish_UniverSR_Audio.json)：音乐/语音双分支参考模板，分别连接模型缓存、音频保存和日志展示节点。
+- [Musefish_UniverSR_Audio.json](../workflows/Musefish_UniverSR_Audio.json)：音乐/语音双分支参考模板，分别连接模型缓存、音频保存和日志展示节点。

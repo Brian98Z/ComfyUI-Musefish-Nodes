@@ -83,10 +83,10 @@ The following is a **historical result from an older configuration**: the origin
 
 | Example | File |
 | --- | --- |
-| Original video | [案例-原视频.mp4](assets/案例-原视频.mp4) |
-| 4× upscale + postprocessing | [案例-4倍超分.mp4](assets/案例-4倍超分.mp4) |
+| Original video | [案例-原视频.mp4](../assets/案例-原视频.mp4) |
+| 4× upscale + postprocessing | [案例-4倍超分.mp4](../assets/案例-4倍超分.mp4) |
 
-![Results comparison](assets/效果对比图.png)
+![Results comparison](../assets/效果对比图.png)
 
 > The upscaled video is 4K portrait (2304×4096) and the file is large. After downloading, view it in a local media player or editing software. For detail comparisons, focus on hair strands, clothing texture, and the sharpness of subject-edge lines.
 
@@ -247,5 +247,5 @@ If local details still flicker:
 
 - `musefish_nodes.py`: PiD upscaling, automatic-batch antiflicker, frequency-separation sharpening nodes, and extension registration.
 - `pid_runtime.py`: Enables independent MLP chunking only for compatible PiD pixel patches; does not tile full-frame attention. Temporary patches to model-clone objects are restored after success, exceptions, and interrupts.
-- [Musefish_PiD_Batch_Video_Upscale.json](workflows/Musefish_PiD_Batch_Video_Upscale.json): Video upscaling and postprocessing template.
+- [Musefish_PiD_Batch_Video_Upscale.json](../workflows/Musefish_PiD_Batch_Video_Upscale.json): Video upscaling and postprocessing template.
 - Template UUID: `d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`.

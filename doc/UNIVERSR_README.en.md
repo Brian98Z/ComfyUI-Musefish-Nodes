@@ -24,7 +24,7 @@ The processing node's `model_cache` input (or `MUSEFISH_UNIVERSR_MODEL_CACHE`) d
 
 ### Audio Example Workflow
 
-Example file: [Musefish_UniverSR_Audio.json](workflows/Musefish_UniverSR_Audio.json), workflow ID: `6e417a01-39fa-461d-9f27-484c97aeef2e`. This is a **16 GB VRAM reference template** with two independent branches for music and speech; it does not send the same audio through both models in sequence.
+Example file: [Musefish_UniverSR_Audio.json](../workflows/Musefish_UniverSR_Audio.json), workflow ID: `6e417a01-39fa-461d-9f27-484c97aeef2e`. This is a **16 GB VRAM reference template** with two independent branches for music and speech; it does not send the same audio through both models in sequence.
 
 ```text
 Music branch (enabled by default)
@@ -151,4 +151,4 @@ On machines without CUDA, any non-`fp32` selection automatically falls back to `
 - `audio_backend/processing.py`: automatic bandwidth detection and general-model correction, chunked super-resolution, and the four processing-mode chains/finalization.
 - `audio_backend/dsp.py`: mastering and audio post-processing (EQ / multiband compression / de-essing / high-frequency shaping / limiting / bandwidth cleanup / Side-channel decorrelation).
 - `audio_backend/worker.py`: isolated processing-process entry point.
-- [Musefish_UniverSR_Audio.json](workflows/Musefish_UniverSR_Audio.json): music/speech two-branch reference template, with separate model-cache, audio-save, and log-display connections.
+- [Musefish_UniverSR_Audio.json](../workflows/Musefish_UniverSR_Audio.json): music/speech two-branch reference template, with separate model-cache, audio-save, and log-display connections.

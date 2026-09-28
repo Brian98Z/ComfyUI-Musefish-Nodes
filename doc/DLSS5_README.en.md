@@ -131,7 +131,7 @@ Progress is sent through ComfyUI's native progress events and calculated from th
 
 ## Intended use and example
 
-The IMAGE node can be connected to LoadImage or short-video frame batches; connect long videos to the three VIDEO nodes described above. See the example result at [`assets/DLSS5超分案例.mp4`](assets/DLSS5超分案例.mp4) (1472×1280@24fps, 10 seconds; 2× RTX VSR + Feature 18).
+The IMAGE node can be connected to LoadImage or short-video frame batches; connect long videos to the three VIDEO nodes described above. See the example result at [`assets/DLSS5超分案例.mp4`](../assets/DLSS5超分案例.mp4) (1472×1280@24fps, 10 seconds; 2× RTX VSR + Feature 18).
 
 ## Verification record (2026-09-23 optimization regression)
 

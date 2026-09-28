@@ -1,6 +1,6 @@
 # Video Download Nodes
 
-This guide documents the `MusefishVideoDownload` and `MusefishWeChatChannels` nodes in ComfyUI-Musefish-Nodes. A ready-to-run workflow is available at [`workflows/Musefish_Video_Downloader.json`](workflows/Musefish_Video_Downloader.json).
+This guide documents the `MusefishVideoDownload` and `MusefishWeChatChannels` nodes in ComfyUI-Musefish-Nodes. A ready-to-run workflow is available at [`workflows/Musefish_Video_Downloader.json`](../workflows/Musefish_Video_Downloader.json).
 
 ## Features and quick start
 

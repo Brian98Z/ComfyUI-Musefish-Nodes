@@ -232,7 +232,7 @@ IMAGE 节点的 8K 档同样采用不高于 4K 的神经增强中间画面，再
 ## 适用范围与案例
 
 IMAGE 节点可接 LoadImage 与短视频帧批次；长视频接上面的三个 VIDEO 节点。
-案例效果见 [`assets/DLSS5超分案例.mp4`](assets/DLSS5超分案例.mp4)
+案例效果见 [`assets/DLSS5超分案例.mp4`](../assets/DLSS5超分案例.mp4)
 （1472×1280@24fps，10 秒；2× RTX VSR + Feature 18）。
 
 ## 验证记录（2026-09-23 优化回归）

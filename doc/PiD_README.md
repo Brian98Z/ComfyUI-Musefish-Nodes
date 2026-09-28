@@ -84,10 +84,10 @@ output    = clamp(images + amount × 软阈值(detail) × 边缘保护, 0, 1)
 
 | 案例 | 文件 |
 | --- | --- |
-| 原视频 | [案例-原视频.mp4](assets/案例-原视频.mp4) |
-| 4 倍超分 + 后处理 | [案例-4倍超分.mp4](assets/案例-4倍超分.mp4) |
+| 原视频 | [案例-原视频.mp4](../assets/案例-原视频.mp4) |
+| 4 倍超分 + 后处理 | [案例-4倍超分.mp4](../assets/案例-4倍超分.mp4) |
 
-![效果对比图](assets/效果对比图.png)
+![效果对比图](../assets/效果对比图.png)
 
 > 说明：超分视频为 4K 竖屏（2304×4096），文件较大，下载后建议本地播放器或剪辑软件查看；对比细节可重点看发丝、衣物纹理与主体边缘线条的锐度。
 
@@ -248,5 +248,5 @@ decode VAE:
 
 - `musefish_nodes.py`：PiD 超分、自动分批去频闪、频率分离锐化节点及扩展注册。
 - `pid_runtime.py`：仅对兼容 PiD 像素块启用独立 MLP 分块；全幅 attention 不切图，模型 clone 的临时对象补丁在成功、异常和中断后恢复。
-- [Musefish_PiD_Batch_Video_Upscale.json](workflows/Musefish_PiD_Batch_Video_Upscale.json)：视频超分与后处理模板。
+- [Musefish_PiD_Batch_Video_Upscale.json](../workflows/Musefish_PiD_Batch_Video_Upscale.json)：视频超分与后处理模板。
 - 模板 UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`。
