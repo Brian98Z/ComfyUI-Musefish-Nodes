@@ -229,6 +229,14 @@ IMAGE 节点的 8K 档同样采用不高于 4K 的神经增强中间画面，再
 `workflows/Musefish_DLSS5_Video_Stream.json` 是当前推荐模板，默认 2×/CPU 编码；
 将 LoadVideo 的示例文件替换为自己的输入，8K 可切换 CPU 或 GPU 编码（自动 HEVC）。
 
+## RunningHub 与 Musefish 任务截图对照
+
+用户提供的两张 RunningHub 界面截图均显示同名输入 `720P切片版-60秒.mp4`（片长约 1 分钟）、放大 2×。**RH DLSS5 Enhance (NR / Upscale)** 的任务耗时 **225.01 秒（3 分 45 秒）**，**Musefish DLSS5 Video Stream** 为 **80.92 秒（1 分 20 秒）**；截图中的任务耗时之比为 **225.01 / 80.92 ≈ 2.78**。这是一次具体的**整任务耗时展示**，不能证明推理引擎本身快 2.78 倍：增强参数可见差异，Musefish 使用 GPU H.264 编码，仅凭截图无法确认后端硬件、队列开销、编码方式或成片画质均相同。请在自己的片源与统一设置下比较。
+
+| RH 任务截图 | Musefish 任务截图 |
+| --- | --- |
+| ![RunningHub RH DLSS5 任务耗时 225.01 秒](../assets/dlss5-runninghub-60s-task.png) | ![Musefish 流式视频任务耗时 80.92 秒](../assets/dlss5-musefish-60s-task.png) |
+
 ## 适用范围与案例
 
 IMAGE 节点可接 LoadImage 与短视频帧批次；长视频接上面的三个 VIDEO 节点。

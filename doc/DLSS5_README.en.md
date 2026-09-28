@@ -129,6 +129,14 @@ Progress is sent through ComfyUI's native progress events and calculated from th
 
 `workflows/Musefish_DLSS5_Video_Stream.json` is the recommended current template and defaults to 2×/CPU encoding. Replace the example file in LoadVideo with your own input. For 8K, choose CPU or GPU encoding (HEVC is selected automatically).
 
+## RunningHub versus Musefish task snapshot
+
+The user supplied two screenshots from the RunningHub interface, each with the same displayed filename `720P切片版-60秒.mp4` (one-minute source) and 2× upscaling. The **RH DLSS5 Enhance (NR / Upscale)** screenshot shows an elapsed task time of **225.01 s (3m 45s)**; the **Musefish DLSS5 Video Stream** screenshot shows **80.92 s (1m 20s)**. Ratio of displayed task times: **225.01 / 80.92 ≈ 2.78**. This example supports a faster *observed end-to-end task*, not a claim of a 2.78× faster inference engine: enhancement settings differ visibly, Musefish uses GPU H.264 encoding, and screenshots alone cannot verify identical backend hardware, queue time, encoder or output quality. Compare on your own clip and settings before drawing performance conclusions.
+
+| RH task screenshot | Musefish task screenshot |
+| --- | --- |
+| ![RunningHub RH DLSS5 task showing 225.01 seconds](../assets/dlss5-runninghub-60s-task.png) | ![Musefish streaming task showing 80.92 seconds](../assets/dlss5-musefish-60s-task.png) |
+
 ## Intended use and example
 
 The IMAGE node can be connected to LoadImage or short-video frame batches; connect long videos to the three VIDEO nodes described above. See the example result at [`assets/DLSS5超分案例.mp4`](../assets/DLSS5超分案例.mp4) (1472×1280@24fps, 10 seconds; 2× RTX VSR + Feature 18).
