@@ -64,4 +64,5 @@
 
 - PiD/UniverSR 模板中的 16GB 设置是参考值，不保证所有素材不 OOM；PiD 长视频仍占 CPU 内存。DLSS5 长视频应优先用流式 VIDEO 而非整段 IMAGE 批次。
 - 同一段 1080P、22 秒视频放大到 8K：**用户实测 GPU HEVC 79 秒、CPU HEVC 300 秒**；仅作为该素材和设备的对照，非通用速度承诺。[详细质量与编码说明](doc/DLSS5_README.md)。
+- **v1.6.0（2026-10-16）**：[Musefish Studio](studio/README.md) 自包含本地客户端模式——一键环境准备（`studio/tools/env_setup.py`：venv + pin ComfyUI v0.39.0 内核 + 两阶段 pip）、ModelScope/HuggingFace 模型下载、模型符号链接映射、server 托管 headless 引擎、Windows 客户端（含模型就绪状态显示）。[GitHub v1.6.0 Release](https://github.com/Brian98Z/ComfyUI-Musefish-Nodes/releases/tag/v1.6.0) 提供 `MusefishStudio-Client-1.6.0-win-x64.exe` 客户端与 `SHA256SUMS.txt` 校验清单。
 - **v1.5.0（2026-09-28）**：DLSS5 英文 Upscale、源分辨率选项过滤、8K 稳定增强、CPU HEVC 与新流式模板。历次版本说明及验证数据见各分项文档；[GitHub v1.5.0 Release](https://github.com/Brian98Z/ComfyUI-Musefish-Nodes/releases/tag/v1.5.0)。

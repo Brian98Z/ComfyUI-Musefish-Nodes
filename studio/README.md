@@ -42,6 +42,10 @@ Electron 客户端(client/) ──┐
 
 ## 使用
 
+**获取客户端（推荐）**：从 [GitHub Releases](https://github.com/Brian98Z/ComfyUI-Musefish-Nodes/releases/latest) 下载
+`MusefishStudio-Client-<版本>-win-x64.exe`（免安装 portable）；完整性用同发布页的
+`SHA256SUMS.txt` 校验（PowerShell：`Get-FileHash .\MusefishStudio-Client-*-win-x64.exe`）。
+
 **终端用户（自包含形态，无需安装 ComfyUI）**
 
 ```
