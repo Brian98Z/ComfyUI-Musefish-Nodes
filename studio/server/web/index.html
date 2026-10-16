@@ -154,6 +154,13 @@ textarea{resize:vertical;min-height:60px}
   flex:1;min-height:120px;max-height:calc(100vh - 320px)}
 #jobs::-webkit-scrollbar,#logbox::-webkit-scrollbar{width:8px}
 #jobs::-webkit-scrollbar-thumb,#logbox::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:4px}
+/* global dark scrollbars (drawers, page) */
+*{scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.16) transparent}
+::-webkit-scrollbar{width:9px;height:9px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:5px}
+::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.26)}
+::-webkit-scrollbar-corner{background:transparent}
 .job{
   position:relative;border:1px solid var(--border);border-left:3px solid var(--faint);
   border-radius:var(--r-md);padding:12px 14px;background:rgba(0,0,0,.22);transition:.18s;
@@ -249,7 +256,7 @@ main#view-work{flex:1}
 .model-row:last-child{border-bottom:0}
 .model-row .dot{width:9px;height:9px;border-radius:50%;flex:none}
 .model-row .dot.ok{background:var(--ok)} .model-row .dot.bad{background:var(--err)}
-.model-row .name{font-weight:600;min-width:210px}
+.model-row .name{font-weight:600;min-width:88px}
 .model-row .desc{color:var(--muted);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .model-row .size{color:var(--faint);font-size:12px;white-space:nowrap}
 
@@ -374,7 +381,18 @@ main#view-work{flex:1}
         （通用平台 + 微信视频号）<br>
         <b>结构</b>：客户端 → 本地工作台服务(:17995) → headless 推理引擎(:17996)<br>
         <b>模型</b>：从工作台 <code>data/models/</code> 统一读取，支持链接映射（零拷贝）或真实文件两种部署<br>
-        <b>要求</b>：NVIDIA RTX 50 系显卡（DLSS5 需要），驱动支持 NGX/D3D12
+        <b>要求</b>：NVIDIA RTX 50 系显卡（DLSS5 需要），驱动支持 NGX/D3D12<br><br>
+        <b>作者</b>：Brian98Z ·
+        <a href="https://github.com/Brian98Z" target="_blank" rel="noopener" style="color:var(--accent)">GitHub</a> ·
+        <a href="https://github.com/Brian98Z/ComfyUI-Musefish-Nodes" target="_blank" rel="noopener" style="color:var(--accent)">项目仓库</a><br>
+        <b>版本</b>：v1.6.0（随 Release 更新）
+      </div>
+      <div class="settings-block" style="margin-top:14px;font-size:12.5px;line-height:1.8;color:var(--muted)">
+        <b style="color:var(--fg)">免责条款</b><br>
+        1. 本工具仅供学习与研究使用，请遵守所在地区法律法规；下载功能不支持也无法用于获取受版权保护的内容，用户需对下载内容的合法性自行负责。<br>
+        2. 视频号等平台内容版权归原作者所有，请勿用于商业用途或二次分发。<br>
+        3. 本软件按“现状”提供，不附带任何明示或默示的担保；作者不对因使用本软件产生的任何直接或间接损失承担责任。<br>
+        4. 模型权重版权归各自权利方所有（PiD/PixelDiT/Flux 权重遵循其官方许可；NVIDIA DLSS/NGX 运行库版权归 NVIDIA）。
       </div>
     </section>
   </div>
