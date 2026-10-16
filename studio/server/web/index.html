@@ -326,8 +326,8 @@ main#view-work{flex:1}
     <section style="padding:0">
       <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg)">❶ 引擎连接</h2>
       <div class="settings-block">
-        <div class="meta" style="margin-bottom:10px">工作台通过本地 ComfyUI HTTP 接口驱动功能。默认自动拉起内置 headless 实例；也可连接你已安装的 ComfyUI（地址各不相同，可手动填写或自动扫描）。</div>
-        <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+        <div class="meta" style="margin-bottom:10px" id="ep-desc">工作台通过本地 ComfyUI HTTP 接口驱动功能。默认自动拉起内置 headless 实例；也可连接你已安装的 ComfyUI（地址各不相同，可手动填写或自动扫描）。</div>
+        <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap" id="ep-manual-row">
           <div><label>主机</label><input type="text" id="ep-host" style="width:150px" placeholder="127.0.0.1"></div>
           <div><label>端口</label><input type="number" id="ep-port" style="width:100px" placeholder="8188"></div>
           <button class="btn sm" id="btn-ep-connect">连接</button>
@@ -853,6 +853,13 @@ async function loadSettings(){
     // backfill current endpoint into the connect form
     try{
       const st = await (await fetch("/api/status")).json();
+      const standalone = st.mode === "standalone";
+      // standalone: engine is server-managed (data/comfyui) — hide manual host/port,
+      // show read-only status; linked (dev machine): keep manual connect + scan
+      document.getElementById("ep-manual-row").style.display = standalone ? "none" : "flex";
+      document.getElementById("ep-desc").textContent = standalone
+        ? "引擎为内置自包含实例（data/comfyui），由工作台自动拉起与管理，无需手动连接。"
+        : "工作台通过本地 ComfyUI HTTP 接口驱动功能。默认自动拉起内置 headless 实例；也可连接你已安装的 ComfyUI（地址各不相同，可手动填写或自动扫描）。";
       $("#ep-host").value = st.comfy.endpoint?.host || "127.0.0.1";
       $("#ep-port").value = st.comfy.endpoint?.port || 8188;
       markEp(st.comfy.running, st.comfy.endpoint?.port);

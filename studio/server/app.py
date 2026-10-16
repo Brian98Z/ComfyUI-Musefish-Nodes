@@ -877,6 +877,7 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/status":
                 self._json({
                     "server": {"host": HOST, "port": PORT},
+                    "mode": "standalone" if (DATA_DIR / "comfyui" / "main.py").is_file() else "linked",
                     "comfy": {
                         "running": client.alive(),
                         "port": COMFY_PORT,
