@@ -339,6 +339,15 @@ main#view-work{flex:1}
 
       <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:26px">❷ 环境准备</h2>
       <div id="env-box" class="settings-block">加载中…</div>
+      <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
+        <button class="btn sm" id="btn-env-setup">一键准备环境（venv + ComfyUI 内核 + 依赖）</button>
+        <span id="env-setup-state" class="meta"></span>
+      </div>
+      <div style="display:flex;gap:10px;margin-top:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn sm" id="btn-models-download">下载缺失模型（ModelScope/HuggingFace）</button>
+        <span id="models-dl-state" class="meta"></span>
+      </div>
+      <div id="models-dl-out" class="settings-block hidden" style="margin-top:10px;max-height:220px;overflow:auto;font:11.5px/1.6 Consolas,monospace;white-space:pre-wrap"></div>
 
       <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:26px">❸ 模型管理</h2>
       <div class="meta" style="margin-bottom:10px" id="model-root-line"></div>
@@ -800,6 +809,40 @@ document.querySelectorAll(".drawer-x").forEach(x=>{
   x.addEventListener("click",()=>{ closeDrawers(); document.querySelectorAll("#views button").forEach(x=>x.classList.remove("active")); });
 });
 document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawers(); });
+
+// one-shot env setup: POST then poll status into the drawer
+$("#btn-env-setup").addEventListener("click",async()=>{
+  const st = $("#env-setup-state");
+  st.textContent = "启动中…（pip 约 15-20 GB，首次需较长时间）";
+  try{
+    const r = await fetch("/api/env/setup",{method:"POST"});
+    const d = await r.json();
+    if(d.error){ st.textContent = "失败："+d.error; return; }
+    const timer = setInterval(async()=>{
+      try{
+        const s = await (await fetch("/api/env/setup/status")).json();
+        const last = (s.tail||[]).slice(-1)[0] || "";
+        st.textContent = s.done ? (last.includes("exited 0") ? "完成 ✅" : "已退出，详见服务日志") : "进行中… "+last.slice(0,60);
+        if(s.done) clearInterval(timer);
+      }catch(e){ clearInterval(timer); }
+    },3000);
+  }catch(e){ st.textContent = "失败："+e; }
+});
+
+// model download (blocking POST, up to 2h): stream output into the box
+$("#btn-models-download").addEventListener("click",async()=>{
+  const st = $("#models-dl-state");
+  const out = $("#models-dl-out");
+  out.classList.remove("hidden");
+  st.textContent = "下载中…";
+  try{
+    const r = await fetch("/api/models/download",{method:"POST",
+      headers:{"Content-Type":"application/json"}, body:JSON.stringify({only:"all"})});
+    const d = await r.json();
+    out.textContent = d.output || "(无输出)";
+    st.textContent = d.ok ? "完成 ✅" : "存在失败项，详见输出";
+  }catch(e){ st.textContent = "失败："+e; }
+});
 
 async function loadSettings(){
   try{

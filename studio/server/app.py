@@ -39,8 +39,20 @@ DATA_DIR = (HERE / CONFIG.get("data_dir", "../data")).resolve()
 UPLOAD_DIR = (HERE / CONFIG.get("upload_dir", "../uploads")).resolve()
 OUTPUT_DIR = (HERE / CONFIG.get("output_dir", "../data/output")).resolve()
 LOG_DIR = (HERE / CONFIG.get("log_dir", "../logs")).resolve()
-COMFY_DIR = ROOT / "comfy"          # junction -> source ComfyUI install
-PY = ROOT / "runtime" / "python" / "python.exe"
+# ComfyUI 引擎目录解析链（首个含 main.py 的生效）：
+#   1. config.comfy_dir        — 显式指定
+#   2. data/comfyui            — 自包含形态（tools/env_setup.py 克隆/安装）
+#   3. <root>/comfy junction   — 开发机快捷方式（指向外部 ComfyUI 安装）
+_COMFY_CANDIDATES = [
+    Path(CONFIG["comfy_dir"]) if CONFIG.get("comfy_dir") else None,
+    DATA_DIR / "comfyui",
+    ROOT / "comfy",
+]
+COMFY_DIR = next((p for p in _COMFY_CANDIDATES if p and (p / "main.py").is_file()),
+                 _COMFY_CANDIDATES[1])
+# 解释器解析链：runtime/venv（env_setup 产物，自包含形态）→ runtime/python junction（开发机）
+_VENV_PY = ROOT / "runtime" / "venv" / ("Scripts/python.exe" if os.name == "nt" else "bin/python3")
+PY = _VENV_PY if _VENV_PY.is_file() else ROOT / "runtime" / "python" / "python.exe"
 # ffmpeg: config.ffmpeg_dir → <root>/ffmpeg/bin (portable bundle) → PATH.
 # yt-dlp 与产物校验都会用到；PATH 兜底由调用处 (shutil.which) 完成。
 _FFMPEG_CANDIDATES = [
@@ -166,6 +178,7 @@ supervisor = ComfySupervisor()
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+_env_setup_proc: dict = {}  # {"proc","tail","done"} — one-shot env setup bookkeeping
 WORK_Q: "queue.Queue[str]" = __import__("queue").Queue()
 TASK_BUILDERS = {
     "pid": workflows.pid_upscale_graph,
@@ -963,6 +976,40 @@ class Handler(BaseHTTPRequestHandler):
                     capture_output=True, text=True, timeout=300)
                 ok = r.returncode == 0
                 self._json({"ok": ok, "output": (r.stdout + r.stderr)[-2000:]})
+            elif path == "/api/env/setup":
+                # one-shot env prep: venv + deps + ComfyUI core (long: pip ~GBs)
+                # run detached; progress lands in the server log, poll /api/env
+                proc = subprocess.Popen(
+                    [str(PY), str(ROOT / "tools" / "env_setup.py")],
+                    cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                    text=True, encoding="utf-8", errors="replace")
+                _env_setup_proc["proc"] = proc
+                _env_setup_proc["tail"] = []
+                def _pump_envsetup():
+                    for line in proc.stdout or []:
+                        with _log_lock:
+                            _env_setup_proc["tail"].append(line.rstrip())
+                            del _env_setup_proc["tail"][:-80]
+                    proc.wait()  # ensure returncode is set before we report
+                    with _log_lock:
+                        _env_setup_proc["done"] = True
+                    log(f"env_setup exited {proc.returncode}")
+                threading.Thread(target=_pump_envsetup, daemon=True).start()
+                self._json({"ok": True, "started": True})
+            elif path == "/api/env/setup/status":
+                with _log_lock:
+                    tail = list(_env_setup_proc.get("tail") or [])
+                    done = _env_setup_proc.get("done", False)
+                self._json({"done": done, "tail": tail[-25:]})
+            elif path == "/api/models/download":
+                body = json.loads(self._body() or b"{}")
+                only = body.get("only", "all")
+                r = subprocess.run(
+                    [str(PY), str(ROOT / "tools" / "download_models.py"),
+                     "--only", str(only)],
+                    capture_output=True, text=True, timeout=7200)
+                self._json({"ok": r.returncode == 0,
+                            "output": (r.stdout + r.stderr)[-6000:]})
             elif path == "/api/comfy/endpoint":
                 req = json.loads(self._body() or b"{}")
                 self._json(apply_comfy_endpoint(req.get("host", COMFY_HOST),
@@ -1135,10 +1182,12 @@ def main() -> None:
     log(f"MusefishStudio server on http://{HOST}:{PORT}")
     log(f"data={DATA_DIR} comfy_dir={COMFY_DIR} py={PY}")
     if not PY.is_file():
-        log("FATAL: runtime/python junction missing — run: python tools/link_models.py")
+        log("FATAL: 未找到 Python 解释器（runtime/venv 或 runtime/python）。")
+        log("       自包含形态: python tools/env_setup.py   开发机: python tools/link_models.py")
         raise SystemExit(3)
     if not (COMFY_DIR / "main.py").is_file():
-        log("FATAL: comfy junction missing — run: python tools/link_models.py")
+        log("FATAL: 未找到 ComfyUI 引擎（data/comfyui 或 comfy junction）。")
+        log("       自包含形态: python tools/env_setup.py   开发机: python tools/link_models.py")
         raise SystemExit(3)
     threading.Thread(target=supervisor.watchdog, daemon=True, name="comfy-watchdog").start()
     if COMFY_AUTOSTART:

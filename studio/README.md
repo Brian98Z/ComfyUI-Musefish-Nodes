@@ -42,14 +42,28 @@ Electron 客户端(client/) ──┐
 
 ## 使用
 
+**终端用户（自包含形态，无需安装 ComfyUI）**
+
+```
+python tools\env_setup.py        # 一键准备：venv + ComfyUI 内核 + 全部依赖（首装约 15-20 GB 下载）
+python tools\download_models.py  # 下载缺失模型（ModelScope/HuggingFace，约 12.7 GB）
+start_server.bat                 # 启动服务（或由客户端自动拉起）
+```
+
+也可在界面 **设置 → ❷ 环境准备** 里点击两个按钮完成同样的事（进度显示在按钮旁）。
+需要本机已装 Python 3.11+ x64（含 venv 组件）与 Git；venv 与引擎都落在
+`runtime/venv`、`data/comfyui`，不依赖任何外部 ComfyUI 安装。
+
+**开发机（链接形态，零拷贝）**
+
 ```
 python tools\link_models.py     # 首次：建立全部映射（校验：--check）
-start_server.bat                # 启动服务（或由客户端自动拉起）
+start_server.bat                # 启动：Studio 17995 + headless ComfyUI 17996
 client\start_client.bat         # 桌面客户端（首次需 client\> npm install）
 ```
 
-浏览器访问 `http://127.0.0.1:17995`，或直接用 Electron 客户端。
-`server/config.json` 可改端口、引擎地址、`ffmpeg_dir`（默认从 PATH 解析）。
+引擎目录解析链：`config.comfy_dir` → `data/comfyui`（自包含）→ `comfy` junction（开发机）；
+解释器解析链：`runtime/venv`（自包含）→ `runtime/python` junction（开发机）。
 
 ## API（本机）
 

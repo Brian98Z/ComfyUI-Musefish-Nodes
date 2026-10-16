@@ -1,0 +1,39 @@
+# Musefish Studio 自包含运行时依赖（安装进 runtime/venv）。
+# torch 走 --extra-index-url https://download.pytorch.org/whl/cu130 的 CUDA 构建。
+torch
+torchvision
+torchsde
+# --- ComfyUI 内核 requirements（与 comfyui-frontend-package 等版本对齐 v0.3.76）---
+comfyui-frontend-package==1.53.10
+comfyui-workflow-templates==0.11.76
+comfyui-embedded-docs==0.5.13
+numpy>=1.25.0
+einops>=0.7
+transformers>=4.50.3
+tokenizers>=0.13.3
+sentencepiece
+safetensors>=0.4.2
+aiohttp>=3.11.8
+yarl>=1.18.0
+pyyaml
+Pillow
+scipy
+tqdm
+psutil
+alembic
+SQLAlchemy>=2.0.0
+filelock
+av>=17.0.0
+comfy-kitchen==0.2.37
+comfy-aimdo==0.5.5
+requests
+simpleeval>=1.0.0
+blake3
+# --- Musefish 插件 requirements ---
+soundfile>=0.12.1
+huggingface_hub>=0.23
+timm>=1.0
+torchdiffeq>=0.2.4
+# --- Studio 直连任务（视频下载/微信解密）---
+yt-dlp>=2025.1.1
+modelscope>=1.20
