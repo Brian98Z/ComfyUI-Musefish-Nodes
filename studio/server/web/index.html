@@ -250,7 +250,7 @@ main#view-work{flex:1}
 .model-row .dot{width:9px;height:9px;border-radius:50%;flex:none}
 .model-row .dot.ok{background:var(--ok)} .model-row .dot.bad{background:var(--err)}
 .model-row .name{font-weight:600;min-width:210px}
-.model-row .desc{color:var(--muted);flex:1}
+.model-row .desc{color:var(--muted);flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .model-row .size{color:var(--faint);font-size:12px;white-space:nowrap}
 
 /* log console */
@@ -886,14 +886,15 @@ async function loadSettings(){
     const mb = document.getElementById("model-box");
     mb.innerHTML = "";
     man.models.forEach(m=>{
-      const st = m.ready ? `<span style="color:var(--ok)">就绪</span>`
-               : m.present ? `<span style="color:var(--warn)">不完整</span>`
-               : `<span style="color:var(--err)">缺失</span>`;
+      const st = el("span",{class:"meta",style:"white-space:nowrap"});
+      st.innerHTML = m.ready ? `<span style="color:var(--ok)">就绪</span>`
+                   : m.present ? `<span style="color:var(--warn)">不完整</span>`
+                   : `<span style="color:var(--err)">缺失</span>`;
       const r = el("div",{class:"model-row"},
         el("span",{class:"dot "+(m.ready?"ok":"bad")}),
         el("span",{class:"name"},m.dir.split("/").pop()),
         el("span",{class:"desc"},m.desc + (m.present?`（${m.files} 个文件）`:" — 缺失")),
-        el("span",{class:"meta",style:"white-space:nowrap"},st),
+        st,
         el("span",{class:"size"}, m.present ? fmtBytes(m.bytes) : ""));
       mb.append(r);
     });
