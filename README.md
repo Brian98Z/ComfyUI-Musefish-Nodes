@@ -2,6 +2,8 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+> **Musefish Studio** — local client for this plugin (PiD / DLSS5 / UniverSR / video download, no ComfyUI web UI needed): see [studio/](studio/README.md).
+
 Choose a workflow by purpose: PiD video upscaling and postprocessing, DLSS5 image/streaming video enhancement, social video downloading, or UniverSR audio upscaling and mastering. Their models, tuning parameters, and VRAM guidance are not interchangeable. Install this directory under `ComfyUI/custom_nodes/ComfyUI-Musefish-Nodes`, install the dependencies required by your workflow in ComfyUI's Python environment, and restart ComfyUI.
 
 ## New user guide: from installation to your first result
