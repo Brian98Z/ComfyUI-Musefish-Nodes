@@ -886,10 +886,14 @@ async function loadSettings(){
     const mb = document.getElementById("model-box");
     mb.innerHTML = "";
     man.models.forEach(m=>{
+      const st = m.ready ? `<span style="color:var(--ok)">就绪</span>`
+               : m.present ? `<span style="color:var(--warn)">不完整</span>`
+               : `<span style="color:var(--err)">缺失</span>`;
       const r = el("div",{class:"model-row"},
-        el("span",{class:"dot "+(m.present?"ok":"bad")}),
+        el("span",{class:"dot "+(m.ready?"ok":"bad")}),
         el("span",{class:"name"},m.dir.split("/").pop()),
         el("span",{class:"desc"},m.desc + (m.present?`（${m.files} 个文件）`:" — 缺失")),
+        el("span",{class:"meta",style:"white-space:nowrap"},st),
         el("span",{class:"size"}, m.present ? fmtBytes(m.bytes) : ""));
       mb.append(r);
     });

@@ -732,11 +732,27 @@ def env_info() -> dict:
 
 # workbench model tree -> what it is for
 MODEL_MANIFEST = {
-    "diffusion_models/PiD": "PiD 超分 UNET（PiD 必需）",
-    "text_encoders/PixelDiT": "PixelDiT 文本编码器（PiD 必需）",
-    "vae/Flux": "Flux VAE（PiD 必需）",
-    "dlss5": "NVIDIA NGX DLSS5 DLL（DLSS5 必需，RTX 50 系）",
-    "UniverSR": "UniverSR 音频超分权重（音频必需）",
+    # 就绪判定对齐 PID_DEFAULTS（工作台实际默认使用的权重）：默认文件在 = 就绪
+    "diffusion_models/PiD": {
+        "desc": "PiD 超分 UNET（PiD 必需）",
+        "required": [r"pid_1.5_flux1_1024_to_4096_4step_int8_convrot.safetensors"],
+    },
+    "text_encoders/PixelDiT": {
+        "desc": "PixelDiT 文本编码器（PiD 必需）",
+        "required": ["gemma_2_2b_it_elm_fp8_scaled.safetensors"],
+    },
+    "vae/Flux": {
+        "desc": "Flux VAE（PiD 必需）",
+        "required": ["UltraFlux-v1-vae.safetensors"],
+    },
+    "dlss5": {
+        "desc": "NVIDIA NGX DLSS5 DLL（DLSS5 必需，RTX 50 系）",
+        "required": ["nvngx_dlss.dll", "nvngx_dlssnr.dll"],
+    },
+    "UniverSR": {
+        "desc": "UniverSR 音频超分权重（音频必需）",
+        "required": [],  # 目录非空即视为就绪（权重经 models/huggingface 缓存布局）
+    },
 }
 
 
@@ -744,12 +760,20 @@ def model_manifest() -> dict:
     import time as _t
 
     items = []
-    for rel, desc in MODEL_MANIFEST.items():
+    for rel, spec in MODEL_MANIFEST.items():
+        desc = spec["desc"]
+        required = spec.get("required") or []
         d = DATA_DIR / "models" / rel
         files = [p for p in d.rglob("*") if p.is_file()] if d.is_dir() else []
         total = sum(f.stat().st_size for f in files)
+        if required:
+            names = {p.name for p in files}
+            ready = all(r in names for r in required)
+        else:
+            ready = bool(files)
         items.append({
             "dir": rel, "desc": desc, "present": bool(files),
+            "ready": ready,
             "files": len(files), "bytes": total,
         })
     return {"models": items, "root": str(DATA_DIR / "models"),
