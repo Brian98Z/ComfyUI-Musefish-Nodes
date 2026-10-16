@@ -324,20 +324,7 @@ main#view-work{flex:1}
   <div class="drawer-head"><b>设置</b><button class="drawer-x" data-close="modal-settings">✕</button></div>
   <div class="drawer-body">
     <section style="padding:0">
-      <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg)">❶ 引擎连接</h2>
-      <div class="settings-block">
-        <div class="meta" style="margin-bottom:10px" id="ep-desc">工作台通过本地 ComfyUI HTTP 接口驱动功能。默认自动拉起内置 headless 实例；也可连接你已安装的 ComfyUI（地址各不相同，可手动填写或自动扫描）。</div>
-        <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap" id="ep-manual-row">
-          <div><label>主机</label><input type="text" id="ep-host" style="width:150px" placeholder="127.0.0.1"></div>
-          <div><label>端口</label><input type="number" id="ep-port" style="width:100px" placeholder="8188"></div>
-          <button class="btn sm" id="btn-ep-connect">连接</button>
-          <button class="btn ghost sm" id="btn-ep-scan">自动扫描</button>
-          <span id="ep-state" class="meta"></span>
-        </div>
-        <div id="ep-found" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"></div>
-      </div>
-
-      <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:26px">❷ 环境准备</h2>
+      <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:0">❶ 环境准备</h2>
       <div id="env-box" class="settings-block">加载中…</div>
       <div style="display:flex;gap:10px;margin-top:10px;align-items:center;flex-wrap:wrap">
         <button class="btn sm" id="btn-env-setup">一键准备环境（venv + ComfyUI 内核 + 依赖）</button>
@@ -348,6 +335,21 @@ main#view-work{flex:1}
         <span id="models-dl-state" class="meta"></span>
       </div>
       <div id="models-dl-out" class="settings-block hidden" style="margin-top:10px;max-height:220px;overflow:auto;font:11.5px/1.6 Consolas,monospace;white-space:pre-wrap"></div>
+
+      <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:26px">❷ 引擎连接</h2>
+      <div class="settings-block">
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <div class="meta" id="ep-desc" style="flex:1;min-width:260px">工作台通过本地 ComfyUI HTTP 接口驱动功能。默认自动拉起内置 headless 实例；也可连接你已安装的 ComfyUI（地址各不相同，可手动填写或自动扫描）。</div>
+          <span id="ep-state" class="meta" style="white-space:nowrap"></span>
+        </div>
+        <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap" id="ep-manual-row">
+          <div><label>主机</label><input type="text" id="ep-host" style="width:150px" placeholder="127.0.0.1"></div>
+          <div><label>端口</label><input type="number" id="ep-port" style="width:100px" placeholder="8188"></div>
+          <button class="btn sm" id="btn-ep-connect">连接</button>
+          <button class="btn ghost sm" id="btn-ep-scan">自动扫描</button>
+        </div>
+        <div id="ep-found" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"></div>
+      </div>
 
       <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:26px">❸ 模型管理</h2>
       <div class="meta" style="margin-bottom:10px" id="model-root-line"></div>
@@ -854,6 +856,7 @@ async function loadSettings(){
     try{
       const st = await (await fetch("/api/status")).json();
       const standalone = st.mode === "standalone";
+      EP_MODE = st.mode || "linked";
       // standalone: engine is server-managed (data/comfyui) — hide manual host/port,
       // show read-only status; linked (dev machine): keep manual connect + scan
       document.getElementById("ep-manual-row").style.display = standalone ? "none" : "flex";
@@ -897,10 +900,16 @@ async function loadSettings(){
 document.getElementById("btn-rescan").addEventListener("click",loadSettings);
 
 // ---- engine connection (manual endpoint + auto scan handshake)
+let EP_MODE = "linked";
 function markEp(running, port){
   const s = document.getElementById("ep-state");
-  s.innerHTML = running ? `<span style="color:var(--ok)">● 已连接 :${port}</span>`
-                        : `<span style="color:var(--err)">● 不可达 :${port}</span>`;
+  if (EP_MODE === "standalone") {
+    s.innerHTML = running ? `<span style="color:var(--ok)">● 引擎可用 :${port}</span>`
+                          : `<span style="color:var(--warn)">● 引擎启动中…</span>`;
+  } else {
+    s.innerHTML = running ? `<span style="color:var(--ok)">● 已连接 :${port}</span>`
+                          : `<span style="color:var(--err)">● 不可达 :${port}</span>`;
+  }
 }
 document.getElementById("btn-ep-connect").addEventListener("click",async()=>{
   const host = $("#ep-host").value.trim() || "127.0.0.1";
