@@ -1,0 +1,13 @@
+# local mutable state
+data/
+uploads/
+logs/
+output/
+dist/
+
+# build artifacts
+client/node_modules/
+client/dist/
+*.exe
+__pycache__/
+*.pyc

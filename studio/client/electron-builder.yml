@@ -1,0 +1,33 @@
+# Musefish Studio 桌面客户端打包配置
+# 产物: 便携版 exe（免安装）。server/runtime/models 不打进包——由 tools/link_models.py
+# 在目标机建立链接或拷贝，exe 只负责拉起服务并展示界面。
+appId: studio.musefish.client
+productName: MusefishStudio
+copyright: Musefish Studio
+
+directories:
+  output: ../dist
+  buildResources: ../assets
+
+files:
+  - main.js
+  - preload.js
+  - package.json
+  # node_modules 只打包 electron 运行时自身依赖；业务零 npm 依赖
+
+win:
+  target:
+    - target: portable
+      arch: [x64]
+  icon: ../assets/icon.ico
+  artifactName: MusefishStudio-Client-${version}.exe
+
+portable:
+  artifactName: MusefishStudio-Client-${version}.exe
+
+# 客户端零业务 npm 依赖,禁用 asar 反而便于排查
+asar: false
+
+# 不打包这些(它们是仓库根的运行时,目标机经 link_models.py 建立)
+extraMetadata:
+  main: main.js

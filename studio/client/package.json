@@ -1,0 +1,15 @@
+{
+  "name": "musefish-studio-client",
+  "productName": "Musefish Studio",
+  "version": "1.0.0",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable --config electron-builder.yml"
+  },
+  "devDependencies": {
+    "electron": "44.7.0",
+    "electron-builder": "^26.0.12"
+  }
+}

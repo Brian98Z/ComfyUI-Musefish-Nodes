@@ -1,0 +1,902 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 128 128'%3E%3Cdefs%3E%3ClinearGradient id='t' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%236d6ef7'/%3E%3Cstop offset='1' stop-color='%239d5cf6'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='128' height='128' rx='28' fill='url(%23t)'/%3E%3Cpath d='M96 64 C84 44 56 40 34 56 L20 44 V84 L34 72 C56 88 84 84 96 64 Z' fill='%23ffffff'/%3E%3Ccircle cx='77' cy='57.5' r='5' fill='%236d6ef7'/%3E%3Cpath d='M97 18 l4.2 10.8 L112 33 l-10.8 4.2 L97 48 l-4.2-10.8 L82 33 l10.8-4.2 Z' fill='%23ffffff'/%3E%3C/svg%3E">
+<title>Musefish Studio</title>
+<style>
+:root{
+  --bg0:#0b0d12; --bg1:#10131b; --panel:rgba(22,26,36,.72); --panel-solid:#161a24;
+  --fg:#e9ecf4; --muted:#8b93a7; --faint:#5b6376;
+  --border:rgba(255,255,255,.07); --border-hi:rgba(255,255,255,.14);
+  --accent:#6d6ef7; --accent2:#9d5cf6; --accent-soft:rgba(109,110,247,.14);
+  --ok:#34c98a; --warn:#f0a24f; --err:#ef5a6a;
+  --r-lg:16px; --r-md:11px; --r-sm:8px;
+  --shadow:0 8px 28px rgba(0,0,0,.35);
+}
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;font:14px/1.55 "Segoe UI Variable Text","Segoe UI",system-ui,"Microsoft YaHei",sans-serif;
+  color:var(--fg);background:
+    radial-gradient(1100px 500px at 85% -10%, rgba(109,110,247,.14), transparent 60%),
+    radial-gradient(900px 420px at -10% 110%, rgba(157,92,246,.10), transparent 60%),
+    linear-gradient(180deg,var(--bg1),var(--bg0));
+  background-attachment:fixed;
+}
+::selection{background:var(--accent-soft)}
+
+/* ---------- header ---------- */
+header{
+  position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;
+  padding:0 22px;height:58px;border-bottom:1px solid var(--border);
+  background:rgba(13,16,23,.78);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+}
+
+/* top nav: primary feature groups */
+nav#groups{display:flex;gap:2px;height:100%;align-self:stretch}
+nav#groups button{
+  appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;
+  padding:0 18px;cursor:pointer;position:relative;transition:.18s;white-space:nowrap;
+}
+nav#groups button:hover{color:var(--fg);background:rgba(255,255,255,.03)}
+nav#groups button.active{color:#fff;font-weight:600}
+nav#groups button.active::after{
+  content:"";position:absolute;left:14px;right:14px;bottom:0;height:2.5px;border-radius:2px 2px 0 0;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+.hdr-right{margin-left:auto;display:flex;align-items:center;gap:10px}
+#comfy-state{
+  display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--muted);
+  padding:5px 12px;border:1px solid var(--border);border-radius:999px;background:var(--panel);
+}
+#comfy-state .dot{width:8px;height:8px;border-radius:50%;background:var(--err);box-shadow:0 0 0 3px rgba(239,90,106,.15);transition:.3s}
+#comfy-state.up .dot{background:var(--ok);box-shadow:0 0 0 3px rgba(52,201,138,.16)}
+#comfy-state.up{color:var(--fg)}
+.btn{
+  appearance:none;border:0;cursor:pointer;font:inherit;font-weight:600;color:#fff;
+  padding:8px 16px;border-radius:var(--r-sm);transition:.18s;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  box-shadow:0 3px 12px rgba(109,110,247,.28);
+}
+.btn:hover:not(:disabled){filter:brightness(1.1);transform:translateY(-1px)}
+.btn:active{transform:translateY(0)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.ghost{
+  background:transparent;border:1px solid var(--border-hi);color:var(--fg);box-shadow:none;font-weight:500;
+}
+.btn.ghost:hover{border-color:var(--accent);color:#fff;background:var(--accent-soft)}
+.btn.sm{padding:6px 12px;font-size:12.5px}
+.btn.danger:hover{border-color:var(--err);background:rgba(239,90,106,.12);color:#ffb9c0}
+
+/* ---------- layout ---------- */
+main{display:grid;grid-template-columns:minmax(340px,420px) 1fr;gap:18px;padding:18px 22px;max-width:1480px;margin:0 auto}
+@media (max-width:1080px){main{grid-template-columns:1fr}}
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r-lg);
+  box-shadow:var(--shadow);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);
+}
+.card.left{padding:18px}
+.card h2{
+  font-size:11.5px;margin:0 0 12px;color:var(--muted);text-transform:uppercase;
+  letter-spacing:.14em;font-weight:600;display:flex;align-items:center;gap:8px;
+}
+.card h2::after{content:"";flex:1;height:1px;background:var(--border)}
+
+/* ---------- feature tabs (within a group) ---------- */
+.tabs{
+  display:grid;gap:4px;padding:4px;margin-bottom:14px;
+  background:rgba(0,0,0,.28);border:1px solid var(--border);border-radius:12px;
+}
+.tabs button{
+  appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13px;
+  padding:8px 4px;border-radius:9px;cursor:pointer;transition:.18s;white-space:nowrap;
+}
+.tabs button:hover{color:var(--fg)}
+.tabs button.active{
+  color:#fff;font-weight:600;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));
+  box-shadow:0 2px 10px rgba(109,110,247,.3);
+}
+.tabs.c2{grid-template-columns:repeat(2,1fr)}
+.tabs.c3{grid-template-columns:repeat(3,1fr)}
+.tabs.c4{grid-template-columns:repeat(4,1fr)}
+
+/* ---------- drop zone ---------- */
+.drop{
+  border:1.5px dashed var(--border-hi);border-radius:var(--r-md);padding:22px 14px;
+  text-align:center;color:var(--muted);cursor:pointer;transition:.2s;background:rgba(0,0,0,.16);
+}
+.drop:hover{border-color:var(--accent);color:var(--fg)}
+.drop.over{border-color:var(--accent);background:var(--accent-soft);color:var(--fg)}
+.drop.has{border-style:solid;border-color:rgba(52,201,138,.5);color:var(--fg);
+  background:rgba(52,201,138,.06)}
+.drop .ic{display:block;margin:0 auto 8px;opacity:.75}
+.drop .name{font-weight:600;color:var(--fg);word-break:break-all}
+
+/* ---------- params ---------- */
+.fieldset{margin-top:16px;padding-top:6px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:10px 12px}
+.field{min-width:0}
+.field.wide{grid-column:1/-1}
+label{display:block;margin:0 0 5px;font-size:12.5px;color:var(--muted)}
+select,input[type=number],input[type=text],textarea{
+  width:100%;padding:8px 10px;background:rgba(0,0,0,.3);color:var(--fg);
+  border:1px solid var(--border-hi);border-radius:var(--r-sm);font:inherit;transition:.16s;
+}
+select:focus,input:focus,textarea:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+select{
+  appearance:none;-webkit-appearance:none;cursor:pointer;
+  padding-right:30px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 15px) 55%,calc(100% - 10px) 55%;
+  background-size:5px 5px;
+  background-repeat:no-repeat;
+}
+select option{background:#161a22;color:var(--fg)}
+select option:checked{background:var(--accent);color:#fff}
+textarea{resize:vertical;min-height:60px}
+.check{display:flex;align-items:center;gap:9px;margin:2px 0 0}
+.check input{width:16px;height:16px;accent-color:var(--accent)}
+.check label{margin:0;color:var(--fg);font-size:13px;cursor:pointer}
+#btn-run{width:100%;margin-top:16px;padding:11px;font-size:14.5px;border-radius:10px}
+
+/* ---------- monitor (jobs + log) ---------- */
+.card.right{padding:18px;display:flex;flex-direction:column;min-height:0;gap:0}
+.mon-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.mon-head h2{margin:0}
+.mon-head h2::after{display:none}
+.mon-tools{margin-left:auto;display:flex;gap:8px}
+.mon-stats{font-size:12px;color:var(--muted);display:flex;gap:12px;align-items:center}
+.mon-stats b{color:var(--fg);font-weight:650}
+#jobs{display:flex;flex-direction:column;gap:10px;overflow:auto;padding-right:4px;
+  flex:1;min-height:120px;max-height:calc(100vh - 320px)}
+#jobs::-webkit-scrollbar,#logbox::-webkit-scrollbar{width:8px}
+#jobs::-webkit-scrollbar-thumb,#logbox::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:4px}
+.job{
+  position:relative;border:1px solid var(--border);border-left:3px solid var(--faint);
+  border-radius:var(--r-md);padding:12px 14px;background:rgba(0,0,0,.22);transition:.18s;
+}
+.job:hover{border-color:var(--border-hi);background:rgba(0,0,0,.3)}
+.job.done{border-left-color:var(--ok)}
+.job.error{border-left-color:var(--err)}
+.job.running,.job.pending{border-left-color:var(--accent)}
+.job .top{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.job .task{font-weight:650;font-size:13.5px}
+.job .task .dur{color:var(--faint);font-weight:400;font-size:12px;margin-left:8px}
+.job .meta{font-size:12px;color:var(--muted);margin-top:3px}
+.badge{
+  display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600;
+  padding:3px 10px;border-radius:999px;background:rgba(255,255,255,.08);color:var(--muted);
+}
+.badge::before{content:"";width:6px;height:6px;border-radius:50%;background:currentColor}
+.badge.done{background:rgba(52,201,138,.14);color:var(--ok)}
+.badge.error{background:rgba(239,90,106,.14);color:var(--err)}
+.badge.running{background:rgba(109,110,247,.16);color:#aeb4ff}
+.badge.running::before{animation:pulse 1.2s infinite}
+@keyframes pulse{50%{opacity:.3}}
+.job .err{color:var(--err);font-size:12px;margin-top:6px;word-break:break-all;line-height:1.45}
+.job .files{display:flex;flex-wrap:wrap;gap:8px;margin-top:9px}
+.job .files a{
+  display:inline-flex;align-items:center;gap:6px;color:#9db4ff;font-size:12px;text-decoration:none;
+  border:1px solid var(--border-hi);padding:4px 10px;border-radius:6px;transition:.15s;background:rgba(0,0,0,.2);
+}
+.job .files a:hover{border-color:var(--accent);color:#fff}
+.job .files a .sz{color:var(--faint);font-size:11px}
+.job img.thumb{max-width:100%;max-height:190px;margin-top:9px;border-radius:8px;border:1px solid var(--border);display:block;cursor:zoom-in}
+.job img.thumb:active{max-height:none;width:100%}
+.job video.thumb{max-width:100%;max-height:220px;margin-top:9px;border-radius:8px;border:1px solid var(--border);display:block}
+.job audio{width:100%;margin-top:9px}
+.empty{color:var(--faint);text-align:center;padding:30px 0;font-size:13px}
+.hidden{display:none !important}
+.job .pct{margin-top:8px;height:5px;border-radius:3px;background:rgba(255,255,255,.08);overflow:hidden}
+.job .pct i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--accent2));transition:width .4s}
+
+/* ---------- topbar views (设置/关于) ---------- */
+nav#views{display:flex;gap:2px;height:100%;align-self:stretch;margin-left:6px;padding-left:14px;border-left:1px solid var(--border)}
+nav#views button{
+  appearance:none;border:0;background:transparent;color:var(--muted);font:inherit;font-size:13.5px;
+  padding:0 16px;cursor:pointer;position:relative;transition:.18s;white-space:nowrap;
+}
+nav#views button:hover{color:var(--fg);background:rgba(255,255,255,.03)}
+nav#views button.active{color:#fff;font-weight:600}
+nav#views button.active::after{
+  content:"";position:absolute;left:12px;right:12px;bottom:0;height:2.5px;border-radius:2px 2px 0 0;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+}
+main#view-work{width:100%}
+main#view-work{flex:1}
+
+/* ---------- drawer (设置/关于 右侧抽屉) ---------- */
+.drawer-mask{
+  position:fixed;inset:0;z-index:60;background:rgba(5,7,12,.55);backdrop-filter:blur(2px);
+}
+.drawer-mask.hidden{display:none}
+.drawer{
+  position:fixed;top:0;right:0;bottom:0;z-index:61;width:min(620px,92vw);
+  background:var(--surface,#12151d);border-left:1px solid var(--border-hi);
+  box-shadow:-18px 0 50px rgba(0,0,0,.5);
+  display:flex;flex-direction:column;
+  animation:drawer-in .22s ease;
+}
+.drawer.hidden{display:none}
+@keyframes drawer-in{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+.drawer-head{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 20px;border-bottom:1px solid var(--border);flex:0 0 auto;
+}
+.drawer-head b{font-size:14.5px}
+.drawer-x{
+  width:30px;height:30px;border:0;border-radius:8px;background:transparent;color:var(--muted);
+  font-size:14px;cursor:pointer;transition:.15s;
+}
+.drawer-x:hover{background:rgba(255,255,255,.08);color:var(--fg)}
+/* 抽屉体即滚动容器:页面主滚动条不动,滑动条在抽屉内 */
+.drawer-body{flex:1;overflow-y:auto;padding:18px 20px 26px}
+
+/* settings blocks */
+.settings-block{
+  border:1px solid var(--border);border-radius:var(--r-md);background:rgba(0,0,0,.2);
+  padding:14px 16px;margin-top:10px;
+}
+.kv{display:grid;grid-template-columns:170px 1fr;gap:7px 14px;font-size:13px;align-items:center}
+.kv .k{color:var(--muted)}
+.kv .v.ok{color:var(--ok)} .kv .v.bad{color:var(--err)}
+.model-row{
+  display:flex;align-items:center;gap:12px;padding:9px 4px;border-bottom:1px solid var(--border);font-size:13px;
+}
+.model-row:last-child{border-bottom:0}
+.model-row .dot{width:9px;height:9px;border-radius:50%;flex:none}
+.model-row .dot.ok{background:var(--ok)} .model-row .dot.bad{background:var(--err)}
+.model-row .name{font-weight:600;min-width:210px}
+.model-row .desc{color:var(--muted);flex:1}
+.model-row .size{color:var(--faint);font-size:12px;white-space:nowrap}
+
+/* log console */
+#logwrap{margin-top:14px;border:1px solid var(--border);border-radius:var(--r-md);background:rgba(0,0,0,.34);overflow:hidden}
+#logwrap .lg-bar{
+  display:flex;align-items:center;gap:8px;padding:6px 12px;border-bottom:1px solid var(--border);
+  font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.12em;
+}
+#logwrap .lg-bar .led{width:7px;height:7px;border-radius:50%;background:var(--ok);box-shadow:0 0 6px var(--ok)}
+#logbox{
+  margin:0;padding:9px 12px;font:11.5px/1.6 Consolas,"Cascadia Mono",monospace;color:#9aa3b8;
+  max-height:150px;overflow:auto;white-space:pre-wrap;
+}
+#logbox .tl{color:var(--faint)}
+</style>
+</head>
+<body>
+<header>
+  <nav id="groups">
+    <button data-g="image" class="active">图像处理</button>
+    <button data-g="video">视频处理</button>
+    <button data-g="audio">音频处理</button>
+    <button data-g="misc">其他工具</button>
+  </nav>
+  <nav id="views">
+    <button data-v="settings">设置</button>
+    <button data-v="about">关于</button>
+  </nav>
+
+  <div class="hdr-right">
+    <span id="comfy-state"><span class="dot"></span>Comfy 引擎检测中…</span>
+    <button class="btn ghost sm" id="btn-stop">停止引擎</button>
+    <button class="btn sm" id="btn-start">启动引擎</button>
+  </div>
+</header>
+
+<main id="view-work">
+  <section class="card left">
+    <div class="tabs" id="tabs"></div>
+
+    <div class="drop" id="drop">
+      <span class="ic"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="M17 8l-5-5-5 5"/><path d="M12 3v12"/></svg></span>
+      <span id="drop-text">点击或拖入文件</span>
+    </div>
+
+    <div class="fieldset"><h2>参数</h2><div class="grid" id="params"></div></div>
+    <button class="btn" id="btn-run">开始处理</button>
+    <div id="preview"></div>
+  </section>
+
+  <section class="card right">
+    <div class="mon-head">
+      <h2>任务</h2>
+      <span class="mon-stats" id="mon-stats"></span>
+      <div class="mon-tools">
+        <button class="btn ghost sm" id="btn-dl-all" title="下载当前列表中全部产物">下载全部</button>
+        <button class="btn ghost sm danger" id="btn-clean" title="删除全部任务产物">一键清理</button>
+      </div>
+    </div>
+    <div id="jobs"><div class="empty">暂无任务</div></div>
+
+    <div id="logwrap">
+      <div class="lg-bar"><span class="led"></span><span>引擎控制台</span></div>
+      <div id="logbox"></div>
+    </div>
+  </section>
+</main>
+
+<div class="drawer-mask hidden" id="mask-settings"></div>
+<div id="modal-settings" class="drawer hidden">
+  <div class="drawer-head"><b>设置</b><button class="drawer-x" data-close="modal-settings">✕</button></div>
+  <div class="drawer-body">
+    <section style="padding:0">
+      <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg)">❶ 引擎连接</h2>
+      <div class="settings-block">
+        <div class="meta" style="margin-bottom:10px">工作台通过本地 ComfyUI HTTP 接口驱动功能。默认自动拉起内置 headless 实例；也可连接你已安装的 ComfyUI（地址各不相同，可手动填写或自动扫描）。</div>
+        <div style="display:flex;gap:10px;align-items:end;flex-wrap:wrap">
+          <div><label>主机</label><input type="text" id="ep-host" style="width:150px" placeholder="127.0.0.1"></div>
+          <div><label>端口</label><input type="number" id="ep-port" style="width:100px" placeholder="8188"></div>
+          <button class="btn sm" id="btn-ep-connect">连接</button>
+          <button class="btn ghost sm" id="btn-ep-scan">自动扫描</button>
+          <span id="ep-state" class="meta"></span>
+        </div>
+        <div id="ep-found" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap"></div>
+      </div>
+
+      <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:26px">❷ 环境准备</h2>
+      <div id="env-box" class="settings-block">加载中…</div>
+
+      <h2 style="font-size:15px;letter-spacing:0;text-transform:none;color:var(--fg);margin-top:26px">❸ 模型管理</h2>
+      <div class="meta" style="margin-bottom:10px" id="model-root-line"></div>
+      <div id="model-box" class="settings-block">加载中…</div>
+      <div style="display:flex;gap:10px;margin-top:12px">
+        <button class="btn ghost sm" id="btn-rescan">重新扫描</button>
+        <button class="btn ghost sm" id="btn-relink" title="开发机：把模型目录重新链接到本机 ComfyUI 安装">重建链接</button>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="drawer-mask hidden" id="mask-about"></div>
+<div id="modal-about" class="drawer hidden">
+  <div class="drawer-head"><b>关于</b><button class="drawer-x" data-close="modal-about">✕</button></div>
+  <div class="drawer-body">
+    <section style="padding:0;line-height:1.9">
+      <h2 style="font-size:16px;letter-spacing:0;text-transform:none;color:var(--fg)">Musefish Studio</h2>
+      <div class="meta">
+        ComfyUI-Musefish-Nodes 插件的本地客户端，开箱即用，无需打开 ComfyUI 网页端。<br><br>
+        <b>功能</b>：PiD 图片/视频超分 · DLSS5 图片/视频增强 · UniverSR 音频超分 · 视频下载
+        （通用平台 + 微信视频号）<br>
+        <b>结构</b>：客户端 → 本地工作台服务(:17995) → headless 推理引擎(:17996)<br>
+        <b>模型</b>：从工作台 <code>data/models/</code> 统一读取，支持链接映射（零拷贝）或真实文件两种部署<br>
+        <b>要求</b>：NVIDIA RTX 50 系显卡（DLSS5 需要），驱动支持 NGX/D3D12
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+"use strict";
+let task = "dlss5_image";
+let group = "image";
+let inputFile = null;
+
+// ---- 功能注册表：按组归类，新功能加一行即可
+const FEATURES = {
+  dlss5_image: { group:"image", label:"DLSS5 图片", accept:"image/*", fileLabel:"图片" },
+  pid:         { group:"image", label:"PiD 超分",  accept:"image/*", fileLabel:"图片" },
+  dlss5_video: { group:"video", label:"DLSS5 视频", accept:"video/*", fileLabel:"视频" },
+  pid_video:   { group:"video", label:"PiD 视频超分", accept:"video/*", fileLabel:"视频（转图片序列逐帧超分，回封 MP4 并保留原音频）" },
+  universr:    { group:"audio", label:"UniverSR 音频超分", accept:"audio/*", fileLabel:"音频" },
+  video_download: { group:"misc", label:"视频下载", accept:null, urlBased:true },
+  wechat_download: { group:"misc", label:"微信视频号下载", accept:null, urlBased:true },
+};
+
+const SCHEMAS = {
+  dlss5_image: {
+    fields: [
+      ["super_resolution","输出倍率",["off","1× (Native)","1.5× (Quality)","2× (Balance)","3× (Performance)","4× (Ultra)","1K","2K","4K","8K"],"2× (Balance)","wide"],
+      ["vsr_quality","VSR 质量",["performance","balanced","quality","ultra"],"ultra"],
+      ["style","风格",["default","natural","cinema"],"default"],
+      ["intensity","强度",0.5,1.0],["local_tone","局部色调",0.5,0.94],
+      ["local_struct","局部结构",0.5,0.84],["skin_struct","皮肤结构",0.5,1.0],
+      ["use_auto_mask","皮肤保护蒙版",true],
+      ["reset_every_n_frames","历史重置间隔帧",1],
+      ["keep_session","会话保持",["auto","off"],"off"],
+    ]},
+  dlss5_video: {
+    fields: [
+      ["super_resolution","输出倍率",["off","1× (Native)","1.5× (Quality)","2× (Balance)","3× (Performance)","4× (Ultra)","1K","2K","4K","8K"],"2× (Balance)","wide"],
+      ["vsr_quality","VSR 质量",["performance","balanced","quality","ultra"],"ultra"],
+      ["style","风格",["default","natural","cinema"],"default"],
+      ["crf","CRF",19],
+      ["encoder","编码器",["libx264（CPU 编码）","h264_nvenc（GPU 编码加速）"],"libx264（CPU 编码）","wide"],
+    ]},
+  pid: {
+    fields: [
+      ["unet","PiD UNET","model:diffusion_models","PiD/pid_1.5_flux1_1024_to_4096_4step_int8_convrot.safetensors","wide"],
+      ["clip","文本编码器","model:text_encoders","PixelDiT/gemma_2_2b_it_elm_fp8_scaled.safetensors","wide"],
+      ["vae","VAE","model:vae","Flux/UltraFlux-v1-vae.safetensors","wide"],
+      ["positive_prompt","正向提示词","text","high quality, ultra detailed, sharp details","wide"],
+      ["upscale_factor","交付倍率",4],["batch_size","批次大小",1],
+      ["steps","步数",4],["cfg","CFG",1.0],
+      ["latent_format","latent 格式",["flux","sd3","sdxl","qwenimage"],"flux"],
+      ["degrade_sigma","退化 sigma",0.5,0.16],
+      ["sampler_name","采样器","sampler","lcm"],["scheduler","调度器","scheduler","simple"],
+      ["pixel_chunk_size","chunk 大小",1024],
+      ["attention_backend","注意力后端",["Kitchen","cuDNN"],"Kitchen"],
+      ["seed","种子",-1],
+      ["postprocess","去频闪 + 锐化",true,"wide"],
+      ["luma_tmp","去频闪·亮度时域",15],["chroma_tmp","去频闪·色度时域",20],
+      ["frames_per_batch","后处理每批帧数",0],
+      ["pp_device","后处理设备",["auto","gpu","cpu"],"auto"],
+      ["sharpen_method","锐化方法",["hard","linear"],"hard"],
+      ["sharpen_blur","锐化模糊核",["median","gaussian"],"median"],
+      ["sharpen_intensity","锐化强度",12],
+      ["sharpen_amount","锐化量",1.0,1.0],
+      ["sharpen_noise","锐化噪声阈",0.0,0.0],
+    ]},
+  pid_video: {
+    fields: [
+      ["unet","PiD UNET","model:diffusion_models","PiD/pid_1.5_flux1_1024_to_4096_4step_int8_convrot.safetensors","wide"],
+      ["clip","文本编码器","model:text_encoders","PixelDiT/gemma_2_2b_it_elm_fp8_scaled.safetensors","wide"],
+      ["vae","VAE","model:vae","Flux/UltraFlux-v1-vae.safetensors","wide"],
+      ["positive_prompt","正向提示词","text","high quality, ultra detailed, sharp details","wide"],
+      ["upscale_factor","交付倍率",4],["batch_size","批次大小",1],
+      ["steps","步数",4],["cfg","CFG",1.0],
+      ["latent_format","latent 格式",["flux","sd3","sdxl","qwenimage"],"flux"],
+      ["degrade_sigma","退化 sigma",0.5,0.16],
+      ["sampler_name","采样器","sampler","lcm"],["scheduler","调度器","scheduler","simple"],
+      ["pixel_chunk_size","chunk 大小",1024],
+      ["attention_backend","注意力后端",["Kitchen","cuDNN"],"Kitchen"],
+      ["seed","种子",-1],
+      ["postprocess","去频闪 + 锐化",true,"wide"],
+      ["luma_tmp","去频闪·亮度时域",15],["chroma_tmp","去频闪·色度时域",20],
+      ["frames_per_batch","后处理每批帧数",0],
+      ["pp_device","后处理设备",["auto","gpu","cpu"],"auto"],
+      ["sharpen_method","锐化方法",["hard","linear"],"hard"],
+      ["sharpen_blur","锐化模糊核",["median","gaussian"],"median"],
+      ["sharpen_intensity","锐化强度",12],
+      ["sharpen_amount","锐化量",1.0,1.0],
+      ["sharpen_noise","锐化噪声阈",0.0,0.0],
+    ]},
+  universr: {
+    fields: [
+      ["model","模型",["general","speech"],"general"],
+      ["mode","模式",["auto","sr","master","sr_master","stem_mix"],"sr"],
+      ["auto_params","自动参数",true],
+      ["input_sr","输入采样率",["auto","8000","12000","16000","24000"],"auto"],
+      ["ode_steps","ODE 步数",4],["ode_method","ODE 方法",["euler","midpoint","rk4"],"midpoint"],
+      ["guidance","guidance",0.5,1.5],["chunk_sec","分块秒数",15],
+      ["channel_mode","声道",["auto","mono","stereo"],"auto"],
+      ["accel","加速",["fp32","cuDNN TF32","bf16"],"cuDNN TF32"],
+      ["deess","去齿音",true],
+      ["seed","种子",0],
+      ["download","允许下载缺失模型",false],
+    ]},
+  video_download: {
+    fields: [
+      ["url","视频链接","textarea",10,"wide"],
+      ["platform","平台",["auto","YouTube","Bilibili","Douyin","Xiaohongshu","X / Twitter"],"auto","wide"],
+      ["quality","画质",["best","1080p","720p","480p"],"best","wide"],
+    ]},
+  wechat_download: {
+    fields: [
+      ["url","分享链接 / 分享文本 / API JSON（可选）","textarea",10,"wide"],
+    ]},
+};
+
+const GROUPS = {
+  image: "图像处理",
+  video: "视频处理",
+  audio: "音频处理",
+  misc:  "其他工具",
+};
+
+const $ = s => document.querySelector(s);
+const el = (t,a={},...c)=>{const n=document.createElement(t);for(const[k,v]of Object.entries(a)){if(k==="class")n.className=v;else if(k.startsWith("on"))n.addEventListener(k.slice(2),v);else n.setAttribute(k,v)}c.forEach(x=>n.append(x));return n};
+
+function featuresOf(g){ return Object.entries(FEATURES).filter(([,f])=>f.group===g); }
+
+function renderTabs(){
+  const box = $("#tabs"); box.innerHTML = "";
+  const list = featuresOf(group);
+  const cols = list.length>=4?"c4":list.length===3?"c3":"c2";
+  box.className = "tabs "+cols;
+  if(!list.length){
+    box.append(el("div",{class:"empty",style:"grid-column:1/-1"},"该分组暂无功能"));
+    return;
+  }
+  list.forEach(([id,f])=>{
+    const b = el("button",{"data-t":id},f.label);
+    if(id===task) b.classList.add("active");
+    box.append(b);
+  });
+  if(!list.some(([id])=>id===task)){
+    task = list[0][0];
+    box.firstChild.classList.add("active");
+  }
+}
+
+$("#tabs").addEventListener("click",e=>{
+  const b = e.target.closest("button[data-t]"); if(!b) return;
+  task = b.dataset.t;
+  document.querySelectorAll("#tabs button").forEach(x=>x.classList.toggle("active",x===b));
+  inputFile = null; updateDrop(); renderParams(); $("#preview").innerHTML="";
+});
+
+$("#groups").addEventListener("click",e=>{
+  const b = e.target.closest("button[data-g]"); if(!b) return;
+  group = b.dataset.g;
+  document.querySelectorAll("#groups button").forEach(x=>x.classList.toggle("active",x===b));
+  // returning to the work view: close any open drawer
+  closeDrawers();
+  document.querySelectorAll("#views button").forEach(x=>x.classList.remove("active"));
+  const list = featuresOf(group);
+  task = list.length ? list[0][0] : task;
+  renderTabs(); renderParams();
+  inputFile = null; updateDrop(); $("#preview").innerHTML="";
+});
+
+function renderParams(){
+  const box = $("#params"); box.innerHTML = "";
+  (SCHEMAS[task]?.fields || []).forEach(f=>{
+    let [name,label,kind,def,wide] = f;
+    // compact forms: [name,label,bool] / [name,label,number] / [name,label,min,max]
+    if(typeof kind==="boolean"){ def = kind; kind = "bool"; }
+    else if(typeof kind==="number" && def===undefined){ def = kind; kind = "num"; }
+    const wrap = el("div",{class:"field"+(wide?" wide":"")});
+    if(typeof kind==="string" && kind.startsWith("model:")){
+      const sel = el("select",{"data-name":name});
+      sel.dataset.kind = kind.split(":")[1];
+      sel.append(el("option",{},def));
+      wrap.append(el("label",{},label),sel);
+      box.append(wrap);
+      fillModels(sel,kind.split(":")[1],def);
+    } else if(kind==="sampler"||kind==="scheduler"){
+      const sel = el("select",{"data-name":name,"data-kind":kind},el("option",{},def));
+      wrap.append(el("label",{},label),sel);
+      box.append(wrap);
+      fillSamplers(sel,kind,def);
+    } else if(kind==="text"){
+      wrap.append(el("label",{},label),el("textarea",{"data-name":name,"data-text":"1"},def||""));
+      box.append(wrap);
+    } else if(kind==="textarea"){
+      const ta = el("textarea",{"data-name":name,"data-text":"1",rows:typeof def==="number"?def:4,placeholder:typeof def==="string"?def:""});
+      wrap.append(el("label",{},label),ta);
+      box.append(wrap);
+    } else if(Array.isArray(kind)){
+      const sel = el("select",{"data-name":name});
+      kind.forEach(o=>sel.append(el("option",{value:o},o)));
+      sel.value = def ?? kind[0];
+      wrap.append(el("label",{},label),sel);
+      box.append(wrap);
+    } else if(kind==="bool" || typeof def==="boolean"){
+      const cb = el("input",{type:"checkbox","data-name":name,id:"ck_"+name});
+      cb.checked = def!==undefined ? !!def : !!kind;
+      wrap.append(el("div",{class:"check"},cb,el("label",{for:"ck_"+name},label)));
+      box.append(wrap);
+    } else {
+      const num = def!==undefined ? def : kind;
+      const isFloat = !Number.isInteger(Number(num));
+      wrap.append(el("label",{},label),
+        el("input",{type:"number",step:isFloat?"0.01":"1","data-name":name,value:num??0}));
+      box.append(wrap);
+    }
+  });
+}
+
+async function fillModels(sel, kind, cur){
+  try{
+    const r = await fetch(`/api/models?kind=${kind}`); const d = await r.json();
+    if(!d.models?.length) return;
+    const norm = s => s.replace(/\\/g,"/");
+    sel.innerHTML = "";
+    d.models.forEach(m=>sel.append(el("option",{value:m.name},`${m.name} (${(m.bytes/1e9).toFixed(1)}GB)`)));
+    sel.value = cur && d.models.some(m=>norm(m.name)===norm(cur)) ? (d.models.find(m=>norm(m.name)===norm(cur)).name) : d.models[0].name;
+  }catch(e){}
+}
+async function fillSamplers(sel, kind, cur){
+  try{
+    const d = await (await fetch("/api/nodes/MusefishPiDBatchVideoUpscale")).json();
+    const info = d.MusefishPiDBatchVideoUpscale?.input;
+    const list = info?.required?.[kind==="sampler"?"sampler_name":"scheduler"]?.[0];
+    if(!list) return;
+    sel.innerHTML = "";
+    list.forEach(o=>sel.append(el("option",{value:o},o)));
+    sel.value = list.includes(cur)?cur:list[0];
+  }catch(e){}
+}
+
+const drop = $("#drop");
+drop.addEventListener("click",()=>picking());
+drop.addEventListener("dragover",e=>{e.preventDefault();drop.classList.add("over")});
+drop.addEventListener("dragleave",()=>drop.classList.remove("over"));
+drop.addEventListener("drop",e=>{e.preventDefault();drop.classList.remove("over");if(e.dataTransfer.files[0])pick(e.dataTransfer.files[0])});
+function picking(){const i=el("input",{type:"file",accept:FEATURES[task].accept,style:"display:none"});
+  i.addEventListener("change",()=>i.files[0]&&pick(i.files[0]));i.click()}
+async function pick(file){
+  $("#drop-text").textContent = "上传中…";
+  const fd = new FormData(); fd.append("file",file);
+  try{
+    const r = await fetch("/api/upload",{method:"POST",body:fd});
+    inputFile = await r.json();
+    updateDrop();
+  }catch(e){ $("#drop-text").textContent = "上传失败："+e; }
+}
+function updateDrop(){
+  const f = FEATURES[task];
+  const urlBased = !!f?.urlBased;
+  drop.classList.toggle("hidden", urlBased);
+  if(urlBased) return;
+  drop.classList.toggle("has",!!inputFile);
+  $("#drop-text").innerHTML = inputFile
+    ? `<span class="name">✔ ${inputFile.name}</span><br><span style="font-size:12px">${(inputFile.bytes/1048576).toFixed(1)} MB · 点击更换</span>`
+    : `点击或拖入${f?f.fileLabel:"文件"}`;
+}
+
+$("#btn-run").addEventListener("click",async()=>{
+  const params = {};
+  document.querySelectorAll("#params [data-name]").forEach(n=>{
+    const v = n.type==="checkbox" ? n.checked : (n.value===""?undefined:(isNaN(Number(n.value))||n.dataset.text==="1"?n.value:Number(n.value)));
+    params[n.dataset.name] = v;
+  });
+  const urlBased = !!FEATURES[task]?.urlBased;
+  const body = urlBased ? {task,params} : {task,input_path:inputFile.path,params};
+  if(!urlBased && !inputFile){ drop.style.borderColor="var(--err)"; setTimeout(()=>drop.style.borderColor="",900); return; }
+  if(urlBased && !params.url && task!=="wechat_download"){ alert("请填写视频链接"); return; }
+  const btn = $("#btn-run"); btn.disabled = true;
+  try{
+    const r = await fetch("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify(body)});
+    const d = await r.json();
+    if(d.error) alert(d.error);
+    pollJobs();
+  } finally { btn.disabled = false; }
+});
+
+// ---- job monitor
+let lastJobs = [];
+function fmtBytes(b){ return b>=1048576 ? (b/1048576).toFixed(1)+" MB" : Math.round(b/1024)+" KB"; }
+
+function renderJobCard(j){
+  const card = el("div",{class:"job "+j.status});
+  card.dataset.jid = j.id;
+  const badge = el("span",{class:"badge "+j.status},j.status);
+  const dur = (j.started&&j.finished)?`${Math.max(1,Math.round(j.finished-j.started))}s`:"";
+  const taskSpan = el("span",{class:"task"},j.task);
+  if(dur) taskSpan.append(el("span",{class:"dur"},dur));
+  card.append(el("div",{class:"top"},taskSpan,badge));
+  const queueTxt = (j.progress && Number.isFinite(j.progress.queue_remaining)) ? ` · 队列剩余 ${j.progress.queue_remaining}` : "";
+  card.append(el("div",{class:"meta"},new Date(j.created*1000).toLocaleString()+queueTxt));
+  if(j.error) card.append(el("div",{class:"err"},j.error));
+  if(j.status==="running" && j.progress?.pct != null){
+    const bar = el("div",{class:"pct"},el("i",{style:`width:${j.progress.pct}%`}));
+    card.append(bar);
+    card.append(el("div",{class:"meta"},`下载中 ${j.progress.pct}%`));
+  }
+  if(j.result?.outputs?.length){
+    const files = el("div",{class:"files"});
+    j.result.outputs.forEach(f=>{
+      const a = el("a",{href:f.url,target:"_blank",download:f.name});
+      a.append(el("span",{},"⬇ "+f.name.split("/").pop()));
+      if(f.bytes) a.append(el("span",{class:"sz"},fmtBytes(f.bytes)));
+      files.append(a);
+    });
+    card.append(files);
+    const img = j.result.outputs.find(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name));
+    if(img) card.append(el("img",{class:"thumb",src:img.url,loading:"lazy",title:"点击放大"}));
+    const vid = j.result.outputs.find(f=>/\.mp4$/i.test(f.name));
+    if(vid) card.append(el("video",{class:"thumb",src:vid.url,controls:"",preload:"metadata"}));
+    const aud = j.result.outputs.find(f=>/\.(flac|wav|mp3)$/i.test(f.name));
+    if(aud) card.append(el("audio",{src:aud.url,controls:""}));
+  }
+  return card;
+}
+
+async function pollJobs(){
+  let d;
+  try{ d = await (await fetch("/api/jobs")).json(); }catch(e){ return; }
+  lastJobs = d.jobs || [];
+  const box = $("#jobs");
+  const running = lastJobs.filter(j=>j.status==="running"||j.status==="pending").length;
+  const done = lastJobs.filter(j=>j.status==="done").length;
+  const files = lastJobs.reduce((n,j)=>n+((j.result?.outputs?.length)||0),0);
+  $("#mon-stats").innerHTML = running?`运行中 <b>${running}</b>`:`完成 <b>${done}</b> · 产物 <b>${files}</b>`;
+
+  if(!lastJobs.length){ box.innerHTML=""; box.append(el("div",{class:"empty"},"暂无任务——提交一个试试")); return; }
+  // Incremental update keyed by job id: never touch a card that hasn't
+  // changed, so a playing <video>/<audio> keeps its element and playback.
+  const seen = new Set();
+  let prev = null;
+  lastJobs.forEach(j=>{
+    seen.add(j.id);
+    let card = box.querySelector(`.job[data-jid="${j.id}"]`);
+    const sig = JSON.stringify([j.status, j.progress, j.error, (j.result?.outputs||[]).map(f=>f.url)]);
+    if(card && card.dataset.sig === sig){ prev = card; return; }  // unchanged: keep media element alive
+    const fresh = renderJobCard(j);
+    fresh.dataset.sig = sig;
+    if(card){ box.replaceChild(fresh, card); }
+    else if(prev){ prev.after(fresh); }
+    else { box.prepend(fresh); }
+    prev = fresh;
+  });
+  box.querySelectorAll(".job").forEach(c=>{ if(!seen.has(c.dataset.jid)) c.remove(); });
+  const empty = box.querySelector(".empty");
+  if(empty) empty.remove();
+}
+
+// download all outputs of visible jobs
+$("#btn-dl-all").addEventListener("click",()=>{
+  const urls = [];
+  lastJobs.forEach(j=>(j.result?.outputs||[]).forEach(f=>urls.push({url:f.url,name:f.name.split("/").pop()})));
+  if(!urls.length){ alert("当前没有可下载的产物"); return; }
+  urls.forEach((u,i)=>setTimeout(()=>{
+    const a = document.createElement("a");
+    a.href = u.url; a.download = u.name; document.body.append(a); a.click(); a.remove();
+  }, i*350));
+});
+
+// one-click cleanup (server deletes output dirs; job list keeps history)
+$("#btn-clean").addEventListener("click",async()=>{
+  if(!confirm("删除全部任务及其产物文件？（运行中的任务保留）")) return;
+  try{
+    const r = await fetch("/api/outputs",{method:"DELETE"});
+    const d = await r.json();
+    if(d.error) alert(d.error); else pollJobs();
+  }catch(e){ alert("清理失败："+e); }
+});
+
+async function pollLog(){
+  try{
+    const d = await (await fetch("/api/log")).json();
+    const box = $("#logbox");
+    // text nodes only: log lines carry user-controlled content (paths, errors)
+    box.textContent = "";
+    d.lines.slice(-40).forEach(l=>{
+      const m = l.match(/^(\[\d{2}:\d{2}:\d{2}\])(.*)$/);
+      if(m){
+        box.append(el("span",{class:"tl"},m[1]));
+        box.append(m[2]);
+      } else {
+        box.append(l);
+      }
+      box.append("\n");
+    });
+    box.scrollTop = box.scrollHeight;
+  }catch(e){}
+}
+
+async function pollStatus(){
+  try{
+    const d = await (await fetch("/api/status")).json();
+    const st = $("#comfy-state");
+    st.classList.toggle("up", d.comfy.running);
+    st.innerHTML = `<span class="dot"></span>${d.comfy.running?"引擎运行中 :"+d.comfy.port:"引擎未运行"}`;
+  }catch(e){}
+}
+$("#btn-start").addEventListener("click",async()=>{await fetch("/api/comfy/start",{method:"POST"});setTimeout(pollStatus,1500)});
+$("#btn-stop").addEventListener("click",async()=>{await fetch("/api/comfy/stop",{method:"POST"});setTimeout(pollStatus,1500)});
+
+// ---- view switching: 设置/关于 = 右侧抽屉
+function openDrawer(id, maskId){
+  document.getElementById(maskId).classList.remove("hidden");
+  document.getElementById(id).classList.remove("hidden");
+  document.querySelectorAll("#views button").forEach(x=>x.classList.remove("active"));
+  if(id==="modal-settings") loadSettings();
+}
+function closeDrawers(){
+  document.querySelectorAll(".drawer").forEach(m=>m.classList.add("hidden"));
+  document.querySelectorAll(".drawer-mask").forEach(m=>m.classList.add("hidden"));
+}
+document.querySelectorAll("#views button").forEach(b=>{
+  b.addEventListener("click",()=>{
+    const v = b.dataset.v;
+    closeDrawers();
+    if(v==="settings") openDrawer("modal-settings", "mask-settings");
+    else if(v==="about") openDrawer("modal-about", "mask-about");
+    document.querySelectorAll("#views button").forEach(x=>x.classList.toggle("active",x===b));
+  });
+});
+// 点击遮罩或 ✕ 关闭
+document.querySelectorAll(".drawer-mask").forEach(m=>{
+  m.addEventListener("mousedown",()=>{ closeDrawers(); document.querySelectorAll("#views button").forEach(x=>x.classList.remove("active")); });
+});
+document.querySelectorAll(".drawer-x").forEach(x=>{
+  x.addEventListener("click",()=>{ closeDrawers(); document.querySelectorAll("#views button").forEach(x=>x.classList.remove("active")); });
+});
+document.addEventListener("keydown",e=>{ if(e.key==="Escape") closeDrawers(); });
+
+async function loadSettings(){
+  try{
+    const [env, man] = await Promise.all([
+      (await fetch("/api/env")).json(),
+      (await fetch("/api/models/manifest")).json(),
+    ]);
+    // backfill current endpoint into the connect form
+    try{
+      const st = await (await fetch("/api/status")).json();
+      $("#ep-host").value = st.comfy.endpoint?.host || "127.0.0.1";
+      $("#ep-port").value = st.comfy.endpoint?.port || 8188;
+      markEp(st.comfy.running, st.comfy.endpoint?.port);
+    }catch(e){}
+    const eb = document.getElementById("env-box");
+    eb.innerHTML = "";
+    const kv = el("div",{class:"kv"});
+    const row = (k,v,ok)=>kv.append(
+      el("span",{class:"k"},k),
+      el("span",{class:"v "+(ok?"ok":"bad")},v));
+    row("内嵌 Python", env.python.ok ? "就绪" : "缺失 — 运行 tools/link_models.py", env.python.ok);
+    row("PyTorch", env.torch, env.torch!=="未知");
+    row("CUDA", env.cuda, env.cuda==="可用");
+    row("FFmpeg", env.ffmpeg.ok ? "就绪" : "缺失（DLSS5 视频编码需要）", env.ffmpeg.ok);
+    row("ComfyUI 内核", env.comfy_dir.ok ? "已映射" : "缺失", env.comfy_dir.ok);
+    row("Musefish 插件", env.plugin.ok ? "已链接（单一事实源）" : "缺失", env.plugin.ok);
+    row("磁盘可用", env.disk_free_gb + " GB", env.disk_free_gb > 5);
+    eb.append(kv);
+
+    document.getElementById("model-root-line").textContent = "模型根目录：" + man.root;
+    const mb = document.getElementById("model-box");
+    mb.innerHTML = "";
+    man.models.forEach(m=>{
+      const r = el("div",{class:"model-row"},
+        el("span",{class:"dot "+(m.present?"ok":"bad")}),
+        el("span",{class:"name"},m.dir.split("/").pop()),
+        el("span",{class:"desc"},m.desc + (m.present?`（${m.files} 个文件）`:" — 缺失")),
+        el("span",{class:"size"}, m.present ? fmtBytes(m.bytes) : ""));
+      mb.append(r);
+    });
+  }catch(e){
+    document.getElementById("env-box").textContent = "加载失败："+e;
+  }
+}
+document.getElementById("btn-rescan").addEventListener("click",loadSettings);
+
+// ---- engine connection (manual endpoint + auto scan handshake)
+function markEp(running, port){
+  const s = document.getElementById("ep-state");
+  s.innerHTML = running ? `<span style="color:var(--ok)">● 已连接 :${port}</span>`
+                        : `<span style="color:var(--err)">● 不可达 :${port}</span>`;
+}
+document.getElementById("btn-ep-connect").addEventListener("click",async()=>{
+  const host = $("#ep-host").value.trim() || "127.0.0.1";
+  const port = Number($("#ep-port").value);
+  const d = await (await fetch("/api/comfy/endpoint",{method:"POST",
+    headers:{"Content-Type":"application/json"},body:JSON.stringify({host,port})})).json();
+  if(d.error){ alert(d.error); return; }
+  markEp(d.running, d.port);
+  pollStatus();
+});
+document.getElementById("btn-ep-scan").addEventListener("click",async()=>{
+  const btn = document.getElementById("btn-ep-scan");
+  btn.disabled = true; btn.textContent = "扫描中…";
+  try{
+    const d = await (await fetch("/api/comfy/scan")).json();
+    const box = document.getElementById("ep-found");
+    box.innerHTML = "";
+    if(!d.found?.length){ box.append(el("span",{class:"meta"},"未发现本机 ComfyUI 实例")); return; }
+    d.found.forEach(f=>{
+      const b = el("button",{class:"btn ghost sm"},
+        `127.0.0.1:${f.port} ✔`);
+      b.addEventListener("click",async()=>{
+        $("#ep-host").value = f.host; $("#ep-port").value = f.port;
+        const r = await (await fetch("/api/comfy/endpoint",{method:"POST",
+          headers:{"Content-Type":"application/json"},body:JSON.stringify({host:f.host,port:f.port})})).json();
+        markEp(r.running, r.port);
+        pollStatus();
+      });
+      box.append(b);
+    });
+  } finally { btn.disabled = false; btn.textContent = "自动扫描"; }
+});
+
+document.getElementById("btn-relink").addEventListener("click",async()=>{
+  if(!confirm("将 data/models 下的模型叶子目录重新链接到本机 ComfyUI 安装（开发机模式）？\n若目录内已是真实文件会被删除并替换为链接。")) return;
+  try{
+    const r = await fetch("/api/models/relink",{method:"POST"});
+    const d = await r.json();
+    alert(d.error ? "失败："+d.error : "已重建链接");
+    loadSettings();
+  }catch(e){ alert("失败："+e); }
+});
+
+renderTabs(); renderParams(); updateDrop(); pollStatus(); pollJobs(); pollLog();
+setInterval(()=>{pollJobs();pollStatus()},2500);
+setInterval(pollLog,3000);
+</script>
+</body>
+</html>

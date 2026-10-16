@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#6d6ef7"/>
+      <stop offset="1" stop-color="#9d5cf6"/>
+    </linearGradient>
+    <linearGradient id="fin" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff" stop-opacity=".95"/>
+      <stop offset="1" stop-color="#d9dcff" stop-opacity=".85"/>
+    </linearGradient>
+  </defs>
+  <rect width="128" height="128" rx="28" fill="url(#tile)"/>
+  <!-- fish body pointing right, forked tail at left -->
+  <path d="M96 64 C84 44 56 40 34 56 L20 44 V84 L34 72 C56 88 84 84 96 64 Z" fill="url(#fin)"/>
+  <!-- eye -->
+  <circle cx="77" cy="57.5" r="5" fill="#6d6ef7"/>
+  <!-- neural sparkle -->
+  <path d="M97 18 l4.2 10.8 L112 33 l-10.8 4.2 L97 48 l-4.2-10.8 L82 33 l10.8-4.2 Z" fill="#ffffff" opacity=".92"/>
+</svg>
