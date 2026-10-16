@@ -54,6 +54,16 @@ start_server.bat                 # 启动服务（或由客户端自动拉起）
 需要本机已装 Python 3.11+ x64（含 venv 组件）与 Git；venv 与引擎都落在
 `runtime/venv`、`data/comfyui`，不依赖任何外部 ComfyUI 安装。
 
+环境准备细节：
+- ComfyUI 内核 pin 在 commit `b0b743566`（v0.39.0，与开发机验证版本一致）——主线后续版本
+  已移除 `comfy.ldm.pixeldit`，而插件 PiD 节点硬依赖该模块，勿随意升级内核。
+- pip 分两阶段：torch 单独走 pytorch.org cu130 源（2 GB 级 wheel 失败不连累其余），
+  依赖与插件走镜像（默认清华，超时 60s 重试 5 次，防单包挂死拖垮整轮）。
+- 克隆完成后会安装内核自带的 `requirements.txt`，与 bundle 清单做权威对齐
+  （如 `comfyui-frontend-package` 版本必须跟随内核要求）。
+- 模型目录 `data/models/` 下按类别放子目录（或指向外部模型库的 NTFS 符号链接/junction，
+  即「映射链接方式引入」，不复制文件）；`data/extra_model_paths.yaml` 会把它挂进引擎。
+
 **开发机（链接形态，零拷贝）**
 
 ```
