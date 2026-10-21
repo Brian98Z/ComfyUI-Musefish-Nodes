@@ -74,5 +74,6 @@
   - **音频：** 批处理监督协议（start/progress/result/error 有序，缺失产物即失败，退出后 stdout 读到 EOF）、BS.1770 K 加权响度、重叠淡出、单声道母带、UniverSR 频带修复。
   - **DLSS5 / 视频：** alpha 原地合成、worker 事件读取可超时、分段下载逐段落盘并校验区间与 Cookie、站点解析失败时自动升级 yt-dlp 并重试一次（6 小时内只尝试一次）。
   - **测试：** fastdl 加固/重定向/连接复用、下载进度、Studio 任务持久化、音频批处理。
+  - **客户端：** [GitHub v1.7.0 Release](https://github.com/Brian98Z/ComfyUI-Musefish-Nodes/releases/tag/v1.7.0) 提供**未签名**便携版 `MusefishStudio-Client-1.7.0.exe`（100 MB，`sha256:679d5e67…f2b819`）与 `SHA256SUMS.txt`，运行前请校验哈希。
 - **v1.6.0（2026-10-16）**：[Musefish Studio](studio/README.md) 自包含本地客户端模式——一键环境准备（`studio/tools/env_setup.py`：venv + pin ComfyUI v0.39.0 内核 + 两阶段 pip）、ModelScope/HuggingFace 模型下载、模型符号链接映射、server 托管 headless 引擎、Windows 客户端（含模型就绪状态显示）。[GitHub v1.6.0 Release](https://github.com/Brian98Z/ComfyUI-Musefish-Nodes/releases/tag/v1.6.0) 提供 `MusefishStudio-Client-1.6.0-win-x64.exe` 客户端与 `SHA256SUMS.txt` 校验清单。
 - **v1.5.0（2026-09-28）**：DLSS5 英文 Upscale、源分辨率选项过滤、8K 稳定增强、CPU HEVC 与新流式模板。历次版本说明及验证数据见各分项文档；[GitHub v1.5.0 Release](https://github.com/Brian98Z/ComfyUI-Musefish-Nodes/releases/tag/v1.5.0)。
