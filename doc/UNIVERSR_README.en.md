@@ -3,8 +3,8 @@
 ### Overview
 
 - **`Musefish UniverSR Model`** prepares the general or speech model cache and can download models on demand. Its output is a cache-directory reference; it does not process audio.
-- **`Musefish UniverSR General Audio`** (node ID: `MusefishUniverSRGeneralAudio`) always uses the general model and supports `sr` (super-resolution only), `master` (V8 mastering), `sr_master` (super-resolution + mastering), and `stem_mix` (Demucs stem separation + mixing).
-- **`Musefish UniverSR Speech Audio`** (node ID: `MusefishUniverSRSpeechAudio`) always uses the speech model and supports only `sr` super-resolution. It does not expose model selection and is intended for voice/speech enhancement.
+- **`Musefish UniverSR General Audio`** (node ID: `musefish_universr_general_audio`) always uses the general model and supports `sr` (super-resolution only), `master` (V8 mastering), `sr_master` (super-resolution + mastering), and `stem_mix` (Demucs stem separation + mixing).
+- **`Musefish UniverSR Speech Audio`** (node ID: `musefish_universr_speech_audio`) always uses the speech model and supports only `sr` super-resolution. It does not expose model selection and is intended for voice/speech enhancement.
 - Both processing nodes accept standard `AUDIO` (`waveform` shaped `B,C,T`), support mono and stereo batches, and take the cache output of `Musefish UniverSR Model` through `model_cache`.
 - The `input_sr=auto` tier criterion is `effective = max(99% rolloff, content cutoff)`. `content cutoff` is the frequency above the rolloff where the spectrum first falls 20 dB below the rolloff level. MP3 rolloff can be as low as about 9.6 kHz while content extends to about 15 kHz; using rolloff alone can select the 24k tier incorrectly and make the model generate 8–12 kHz from scratch. Tier table: `effective ≤ 5.4 kHz → 8k` (the 5.0–5.4 kHz boundary band probes 8k first), `≤ 7.2 kHz → 16k`, `≤ 12 kHz → 16k` (when content reaches 12 kHz, the 16k condition focuses on cleanup/enhancement rather than generating content from nothing), and otherwise `→ 24k`. The 12k tier is no longer selected as an output tier.
 - **Hard 8k guard:** for `effective ≤ 5000 Hz`, use the 8k tier directly with no upward correction. The correction window (4150–5850 Hz) can mistake residual energy in the filter transition band for persistent high-frequency evidence; tests incorrectly promoted every 3400–5000 Hz effective-bandwidth sample to 12k/16k. The 5.0–5.4 kHz boundary band still goes through correction, so a low-bandwidth sample with `effective = 5062 Hz` can be promoted to 12k.
@@ -28,14 +28,14 @@ Example file: [Musefish_UniverSR_Audio.json](../workflows/Musefish_UniverSR_Audi
 
 ```text
 Music branch (enabled by default)
-LoadAudio ── AUDIO ──────────────────────→ MusefishUniverSRGeneralAudio
-MusefishUniverSRModel (general) ─ model_cache ─→ ↑
+LoadAudio ── AUDIO ──────────────────────→ musefish_universr_general_audio
+musefish_universr_model (general) ─ model_cache ─→ ↑
                                              ├─ audio → SaveAudioAdvanced (FLAC)
                                              └─ log   → ShowText|pysssss
 
 Speech branch (bypassed by default)
-LoadAudio ── AUDIO ──────────────────────→ MusefishUniverSRSpeechAudio
-MusefishUniverSRModel (speech) ─ model_cache ─→ ↑
+LoadAudio ── AUDIO ──────────────────────→ musefish_universr_speech_audio
+musefish_universr_model (speech) ─ model_cache ─→ ↑
                                              ├─ audio → SaveAudioAdvanced (FLAC)
                                              └─ log   → ShowText|pysssss
 ```

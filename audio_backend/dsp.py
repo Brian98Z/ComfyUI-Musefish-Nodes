@@ -140,10 +140,38 @@ def early_reflections(final: np.ndarray, sr: int = TARGET_SR, wet_db: float = -3
     return final + er * wet
 
 
+def k_weighting(x: np.ndarray, sr: int = TARGET_SR) -> np.ndarray:
+    """ITU-R BS.1770 K-weighting: head high-shelf (+4 dB above ~1.7 kHz) then
+    the RLB high-pass. A plain high-pass here reads low/mid content 20-50 dB
+    low and drags every loudness-driven gain decision with it."""
+    from scipy.signal import lfilter
+
+    # Stage 1 — head shelf (libebur128's bilinear coefficients).
+    f0, gain_db, q = 1681.974450955533, 3.999843853973347, 0.7071752369554196
+    k = np.tan(np.pi * f0 / sr)
+    vh = 10 ** (gain_db / 20.0)
+    vb = vh ** 0.4996667741545416
+    a0 = 1.0 + k / q + k * k
+    shelf = (
+        [(vh + vb * k / q + k * k) / a0, 2.0 * (k * k - vh) / a0, (vh - vb * k / q + k * k) / a0],
+        [1.0, 2.0 * (k * k - 1.0) / a0, (1.0 - k / q + k * k) / a0],
+    )
+    # Stage 2 — RLB high-pass.
+    f0, q = 38.13547087602444, 0.5003270373238773
+    k = np.tan(np.pi * f0 / sr)
+    hp = ([1.0, -2.0, 1.0],
+          [1.0, 2.0 * (k * k - 1.0) / (1.0 + k / q + k * k),
+           (1.0 - k / q + k * k) / (1.0 + k / q + k * k)])
+    out = np.empty_like(x, dtype=np.float64)
+    for c in range(x.shape[1]):
+        y = lfilter(*shelf, x[:, c].astype(np.float64))
+        out[:, c] = lfilter(*hp, y)
+    return out
+
+
 def lufs_gated(x: np.ndarray, sr: int = TARGET_SR) -> float:
-    sos_hs = butter(2, 1681, btype="high", fs=sr, output="sos")
-    sos_hp = butter(2, 38, btype="high", fs=sr, output="sos")
-    ys = [sosfilt(sos_hp, sosfilt(sos_hs, x[:, c])) for c in range(x.shape[1])]
+    weighted = k_weighting(x, sr)
+    ys = [weighted[:, c] for c in range(weighted.shape[1])]
     blk, hop = int(0.4 * sr), int(0.1 * sr)
     n = max(1, (x.shape[0] - blk) // hop + 1)
     e = np.array([sum(np.mean(y[i * hop:i * hop + blk] ** 2) for y in ys) for i in range(n)])
@@ -212,7 +240,7 @@ def _band_energy_db(sig: np.ndarray, sr: int, f0: float, f1: float) -> float:
 
 
 def hf_shape(final: np.ndarray, sr: int = TARGET_SR, drop1216_target: float = 27.0,
-             d812_now: float | None = None, max_iter: int = 8) -> np.ndarray:
+             correct_812_first_pass: bool = True, max_iter: int = 8) -> np.ndarray:
     """Drive the 12-16k / 16-20k falls toward 27 / 45 dB below 0-8k, measured per pass.
 
     Cut-only guard: a band's cumulative gain never exceeds the input level, so an already
@@ -237,7 +265,8 @@ def hf_shape(final: np.ndarray, sr: int = TARGET_SR, drop1216_target: float = 27
         g1216 = min(10 ** (err1216 / 40), 1.0 / prev1216)
         g1620 = min(10 ** (err1620 / 40), 1.0 / prev1620)
         # 8-12k: cut only when the band is too bright; a dark band is left alone.
-        g812 = 10 ** ((d812 - 15.0) / 40) if d812_now is not None and it == 0 and d812 < 15.0 else 1.0
+        g812 = (10 ** ((d812 - 15.0) / 40)
+                if correct_812_first_pass and it == 0 and d812 < 15.0 else 1.0)
         if max(abs(20 * np.log10(g1216)), abs(20 * np.log10(g1620)),
                abs(20 * np.log10(g812))) < 0.05:
             break                        # every band already at or below its target
@@ -307,8 +336,13 @@ def soft_limit_tp2(x: np.ndarray, ceiling_lin: float, sr: int = TARGET_SR,
         nb = int(np.ceil(len(need) / (blk1 * 4)))
         pad = nb * blk1 * 4 - len(need)
         need_b = np.pad(need, (0, pad), constant_values=1.0).reshape(nb, blk1 * 4).min(axis=1)
-        need_b = np.roll(need_b, -la_blk)
-        need_b[-la_blk:] = 1.0
+        # Gain must drop la_blk blocks *before* a peak, but each block also keeps its
+        # own requirement: a plain roll moved the first blocks' peaks past the window
+        # and pushed the last ones out entirely, so both ends stayed unlimited.
+        need_fwd = need_b.copy()
+        for step in range(1, min(la_blk, nb - 1) + 1):
+            need_fwd[: nb - step] = np.minimum(need_fwd[: nb - step], need_b[step:])
+        need_b = need_fwd
         g = np.empty_like(need_b)
         prev = 1.0
         for i in range(nb):
@@ -335,8 +369,13 @@ def master_chain(st48: np.ndarray, peak_headroom_db: float = 0.0,
     way the sr_master / stem_mix vocal paths do.
     """
     final = np.asarray(st48, dtype=np.float64).copy()
+    mono = final.ndim == 1 or (final.ndim == 2 and final.shape[1] == 1)
     if final.ndim == 1:
-        final = np.stack([final, final], axis=1)
+        final = final[:, None]
+    if mono:
+        # The stereo stages below (width/early reflections) write both columns;
+        # process a duplicated mono pair and collapse back on the way out.
+        final = np.repeat(final, 2, axis=1)
     sr = TARGET_SR
     n_fade = int(0.005 * sr)
     if len(final) > 2 * n_fade:
@@ -346,9 +385,9 @@ def master_chain(st48: np.ndarray, peak_headroom_db: float = 0.0,
     final = eq_tone(final, sr, gentle=True)
     final = multiband_comp(final, sr)
     final = early_reflections(final, sr, wet_db=-30.0)
-    e08, e812 = _band_energies_db(final, sr, [(0, 8000), (8000, 12000)])
-    d812 = e08 - e812
-    final = hf_shape(final, sr, drop1216_target=27.0, d812_now=d812)
+    # hf_shape measures its own 0-8k / 8-12k energies; the old caller-side pass
+    # only fed the unused `d812_now` argument (a whole-track STFT per call).
+    final = hf_shape(final, sr, drop1216_target=27.0)
     ceil_db = -0.3 - float(peak_headroom_db)
     tp_rise = 0.0
     for _ in range(4):
@@ -360,9 +399,7 @@ def master_chain(st48: np.ndarray, peak_headroom_db: float = 0.0,
         final = soft_limit(final, 10 ** ((ceil_db - tp_rise) / 20))
     if vocal_gentle:
         final = de_esser(final, sr)
-    e08_f, e812_f = _band_energies_db(final, sr, [(0, 8000), (8000, 12000)])
-    d812_f = e08_f - e812_f
-    final = hf_shape(final, sr, drop1216_target=27.0, d812_now=d812_f)
+    final = hf_shape(final, sr, drop1216_target=27.0)
     final = spectral_cut(final, sr, 19200)
     limit_db = min(-0.4, ceil_db - 0.1)
     tp = true_peak_db(final, sr)
@@ -372,7 +409,7 @@ def master_chain(st48: np.ndarray, peak_headroom_db: float = 0.0,
     if len(final) > 2 * n_fade:
         final[:n_fade] *= fade[:, None]
         final[-n_fade:] *= fade[::-1][:, None]
-    return final
+    return final[:, :1] if mono else final
 
 
 def denoise_gate(y48: np.ndarray, src48: np.ndarray) -> np.ndarray:
@@ -390,7 +427,8 @@ def denoise_gate(y48: np.ndarray, src48: np.ndarray) -> np.ndarray:
     hf_y = np.nan_to_num(sosfiltfilt(sos_band, y[:m], axis=0), nan=0.0, posinf=0.0, neginf=0.0)
     env = _moving_rms(hf_src, int(0.02 * sr))
     k = np.ones(int(0.05 * sr)) / int(0.05 * sr)
-    env = np.clip(np.stack([np.convolve(env[:, c], k, "same") for c in range(2)], axis=1), 0.0, 10.0)
+    # 2400-tap box: direct convolution is O(n·taps) per channel (measured 3.3x slower).
+    env = np.clip(np.stack([fftconvolve(env[:, c], k, mode="same") for c in range(2)], axis=1), 0.0, 10.0)
     ref = np.maximum(np.percentile(env, 90, axis=0, keepdims=True), 1e-8)
     gdb = np.clip((20 * np.log10(np.maximum(env, 1e-8)) - (ref - 20.0)) / 4.0, -20.0, 0.0)
     out = y[:m] - hf_y + hf_y * 10 ** (gdb / 20)
@@ -407,11 +445,11 @@ def brighten(y48: np.ndarray, gain_db: float = 1.5) -> np.ndarray:
 
 
 def clean_sr_output(st: np.ndarray, orig_sr: int, input_sr: int) -> np.ndarray:
-    # The model output is always TARGET_SR. Do not cap it at the low-rate input Nyquist:
-    # that deletes the very band the SR model reconstructed.  What is above the container's
-    # own Nyquist is generated by definition, so the cut sits at the smaller of the two
-    # (4% transition) — this keeps generated noise out without touching rebuilt content.
-    keep_hz = min(max(int(input_sr), int(orig_sr)) / 2.0, 20000.0)
+    # The model output is always TARGET_SR. Never cap the result at the *input's*
+    # Nyquist: an 8 kHz source upsampled to 48 kHz legitimately carries content up to
+    # 20 kHz, and a 4 kHz cutoff deleted exactly the band the SR model rebuilt. The cut
+    # sits at the output band edge with a 4% transition.
+    keep_hz = min(TARGET_SR / 2.0, 20000.0)
     sos_lp = butter(8, keep_hz, btype="low", fs=TARGET_SR, output="sos")
     out = sosfiltfilt(sos_lp, st, axis=0)
     n = len(out)
@@ -444,7 +482,8 @@ def decorrelate_side_hf(side_bl: np.ndarray, mid: np.ndarray) -> np.ndarray:
     sos_hs = butter(2, 6000, btype="high", fs=TARGET_SR, output="sos")
     envelope = np.abs(sosfiltfilt(sos_hs, side, axis=0))
     window = np.ones(int(0.05 * TARGET_SR)) / int(0.05 * TARGET_SR)
-    envelope = np.stack([np.convolve(envelope[:, c], window, mode="same") for c in range(envelope.shape[1])], axis=1)
+    envelope = np.stack([fftconvolve(envelope[:, c], window, mode="same")
+                         for c in range(envelope.shape[1])], axis=1)
     rng = np.random.default_rng(1970)
     noise = sosfiltfilt(sos_hs, rng.standard_normal(n_bl))
     noise = sosfiltfilt(butter(4, 19000, btype="low", fs=TARGET_SR, output="sos"), noise)

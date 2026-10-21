@@ -1,7 +1,7 @@
 import { app } from "../../scripts/app.js";
 
-const STREAM_TYPE = "MusefishDLSS5VideoStream";
-const IMAGE_TYPE = "MusefishDLSS5NeuralRender";
+const STREAM_TYPE = "musefish_dlss5_video_stream";
+const IMAGE_TYPE = "musefish_dlss5_neural_render";
 const CURRENT = ["super_resolution", "style", "vsr_quality", "intensity", "local_tone",
   "local_struct", "skin_struct", "use_auto_mask", "crf", "encoder"];
 const PREVIOUS = ["style", "intensity", "local_tone", "local_struct", "skin_struct",

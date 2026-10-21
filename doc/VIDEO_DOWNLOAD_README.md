@@ -2,8 +2,8 @@
 
 ### 功能与快速上手
 
-- **`Musefish Video Download`**（节点 ID：`MusefishVideoDownload`）：通用平台视频下载。YouTube / B站 / X/Twitter 走进程内 yt-dlp；抖音走内置 iesdouyin 分享页解析（yt-dlp 的 Douyin 提取器被 a_bogus 签名墙挡死，不可用）；小红书走 yt-dlp 尝试、失败即报错并建议改走浏览器提取。每个文件在节点返回前都经过 MP4 `ftyp` 头 + ffprobe 双重验证。
-- **`Musefish WC Video Channels`**（节点 ID：`MusefishWeChatChannels`）：微信视频号一键下载解密。单一直线流程，全自动、无需手动填 key：
+- **`Musefish Video Download`**（节点 ID：`musefish_video_downloader`）：通用平台视频下载。YouTube / B站 / X/Twitter 走进程内 yt-dlp；抖音走内置 iesdouyin 分享页解析（yt-dlp 的 Douyin 提取器被 a_bogus 签名墙挡死，不可用）；小红书走 yt-dlp 尝试、失败即报错并建议改走浏览器提取。每个文件在节点返回前都经过 MP4 `ftyp` 头 + ffprobe 双重验证。
+- **`Musefish WC Video Channels`**（节点 ID：`musefish_wc_video_channels`）：微信视频号一键下载解密。单一直线流程，全自动、无需手动填 key：
   **自动解析粘贴内容 → 扫描客户端内存获取 URL/decode_key → 下载密文 → ftyp 头校验 → 解密 → ffprobe 验证**。
   校验不通过立即中止：key 错误时不会下载完整文件，也不会输出未验证的文件。
 

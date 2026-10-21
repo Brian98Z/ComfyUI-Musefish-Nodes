@@ -260,7 +260,7 @@
         363.14738832737197
       ],
       "properties": {
-        "Node name for S&R": "MusefishUniverSRModel",
+        "Node name for S&R": "musefish_universr_model",
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ue_properties": {
           "input_ue_unconnectable": {},
@@ -273,7 +273,7 @@
         317.27451067563857,
         120.7519414275958
       ],
-      "type": "MusefishUniverSRModel",
+      "type": "musefish_universr_model",
       "widgets_values": [
         "general",
         true
@@ -323,7 +323,7 @@
         1011.4921453982354
       ],
       "properties": {
-        "Node name for S&R": "MusefishUniverSRModel",
+        "Node name for S&R": "musefish_universr_model",
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ue_properties": {
           "input_ue_unconnectable": {},
@@ -336,7 +336,7 @@
         317.27451067563857,
         120.7519414275958
       ],
-      "type": "MusefishUniverSRModel",
+      "type": "musefish_universr_model",
       "widgets_values": [
         "speech",
         true
@@ -641,7 +641,7 @@
         769.1346245882495
       ],
       "properties": {
-        "Node name for S&R": "MusefishUniverSRSpeechAudio",
+        "Node name for S&R": "musefish_universr_speech_audio",
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ue_properties": {
           "input_ue_unconnectable": {},
@@ -654,7 +654,7 @@
         412.47570561134285,
         517.0135304096596
       ],
-      "type": "MusefishUniverSRSpeechAudio",
+      "type": "musefish_universr_speech_audio",
       "widgets_values": [
         false,
         "auto",
@@ -872,7 +872,7 @@
         120.21218123609233
       ],
       "properties": {
-        "Node name for S&R": "MusefishUniverSRGeneralAudio",
+        "Node name for S&R": "musefish_universr_general_audio",
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ue_properties": {
           "input_ue_unconnectable": {},
@@ -885,7 +885,7 @@
         410.5959092548361,
         539.1299366465964
       ],
-      "type": "MusefishUniverSRGeneralAudio",
+      "type": "musefish_universr_general_audio",
       "widgets_values": [
         false,
         "auto",

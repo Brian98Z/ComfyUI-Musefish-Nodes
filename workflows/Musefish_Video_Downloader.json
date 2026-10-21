@@ -108,7 +108,7 @@
     },
     {
       "id": 18,
-      "type": "MusefishWeChatChannels",
+      "type": "musefish_wc_video_channels",
       "pos": [
         -209.88637370879516,
         -98.52746946802165
@@ -138,7 +138,7 @@
       "properties": {
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ver": "286d7ef03ed6b40375df169e08dea799d8721c24",
-        "Node name for S&R": "MusefishWeChatChannels",
+        "Node name for S&R": "musefish_wc_video_channels",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},
@@ -192,7 +192,7 @@
     },
     {
       "id": 17,
-      "type": "MusefishVideoDownload",
+      "type": "musefish_video_downloader",
       "pos": [
         827.4968370023122,
         -94.16168759222111
@@ -222,7 +222,7 @@
       "properties": {
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ver": "286d7ef03ed6b40375df169e08dea799d8721c24",
-        "Node name for S&R": "MusefishVideoDownload",
+        "Node name for S&R": "musefish_video_downloader",
         "ue_properties": {
           "widget_ue_connectable": {},
           "input_ue_unconnectable": {},

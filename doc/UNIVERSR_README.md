@@ -4,8 +4,8 @@
 
 - **`Musefish UniverSR Model`**：准备 general / speech 模型缓存，可按需下载；输出缓存目录，不处理音频。
 
-- **`Musefish UniverSR General Audio`**（节点 ID：`MusefishUniverSRGeneralAudio`）：固定使用 general 模型，支持 `sr`（仅超分）、`master`（V8 母带）、`sr_master`（超分+母带）和 `stem_mix`（Demucs 分轨+混音）。
-- **`Musefish UniverSR Speech Audio`**（节点 ID：`MusefishUniverSRSpeechAudio`）：固定使用 speech 模型，仅支持 `sr` 超分；不暴露模型选择，适合人声/语音增强。
+- **`Musefish UniverSR General Audio`**（节点 ID：`musefish_universr_general_audio`）：固定使用 general 模型，支持 `sr`（仅超分）、`master`（V8 母带）、`sr_master`（超分+母带）和 `stem_mix`（Demucs 分轨+混音）。
+- **`Musefish UniverSR Speech Audio`**（节点 ID：`musefish_universr_speech_audio`）：固定使用 speech 模型，仅支持 `sr` 超分；不暴露模型选择，适合人声/语音增强。
 - 两个节点都处理标准 `AUDIO`（`waveform` 为 `B,C,T`），逐批支持单声道/立体声，并通过 `model_cache` 输入连接 `Musefish UniverSR Model` 的缓存输出。
 - `input_sr=auto` 的档位判据是 `effective = max(99% rolloff, content cutoff)`。`content cutoff` 指 rolloff 之上频谱首次跌落到 rolloff 电平 20 dB 以下处的频率——MP3 的 rolloff 可低至约 9.6 kHz 而内容一直延伸到约 15 kHz，只看 rolloff 会误选 24k 档，让模型凭空生成 8–12 kHz。档位表：`effective ≤ 5.4 kHz → 8k`（5.0–5.4 kHz 边界带先用 8k 试探）、`≤ 7.2 kHz → 16k`、`≤ 12 kHz → 16k`（内容到 12k 时 16k 条件专注清理与增强，不凭空生成）、其余 `→ 24k`；不再直接输出 12k 档。
 - **8k 硬落地护栏**：`effective ≤ 5000 Hz` 时直接采用 8k 档，不做向上校正。校正判据窗口（4150–5850 Hz）会把滤波过渡带残能当成「持续高频证据」，实测把 effective 3400–5000 Hz 的素材全部升到 12k/16k。5.0–5.4 kHz 边界带仍走校正，因此 `effective = 5062 Hz` 的低带宽素材可被升到 12k 档。
@@ -25,14 +25,14 @@ worker 使用启动 ComfyUI 的 `sys.executable`，支持 Python 3.10–3.13 的
 
 ```text
 音乐分支（默认启用）
-LoadAudio ── AUDIO ──────────────────────→ MusefishUniverSRGeneralAudio
-MusefishUniverSRModel（general）─ model_cache ─→ ↑
+LoadAudio ── AUDIO ──────────────────────→ musefish_universr_general_audio
+musefish_universr_model（general）─ model_cache ─→ ↑
                                              ├─ audio → SaveAudioAdvanced（FLAC）
                                              └─ log   → ShowText|pysssss
 
 语音分支（默认旁路）
-LoadAudio ── AUDIO ──────────────────────→ MusefishUniverSRSpeechAudio
-MusefishUniverSRModel（speech）── model_cache ─→ ↑
+LoadAudio ── AUDIO ──────────────────────→ musefish_universr_speech_audio
+musefish_universr_model（speech）── model_cache ─→ ↑
                                              ├─ audio → SaveAudioAdvanced（FLAC）
                                              └─ log   → ShowText|pysssss
 ```

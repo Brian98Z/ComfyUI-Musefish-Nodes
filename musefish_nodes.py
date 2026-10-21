@@ -7,6 +7,10 @@ preloaded once for the execution and reused for every batch.
 
 from __future__ import annotations
 
+import contextlib
+import functools
+import inspect
+import threading
 from fractions import Fraction
 from typing import Optional
 
@@ -24,6 +28,7 @@ from typing_extensions import override
 from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel, MusefishUniverSRSpeechAudio
 from .musefish_dlss5 import MusefishDLSS5NeuralRender
 from .musefish_dlss5_stream import MusefishDLSS5VideoStream
+from .musefish_file_download import MusefishFileDownload
 from .musefish_video_nodes import MusefishVideoDownload, MusefishWeChatChannels
 from .pid_runtime import (
     DEFAULT_ATTENTION_BACKEND,
@@ -264,8 +269,8 @@ class AutoBatchAntiflicker(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="AutoBatchAntiflicker",
-            display_name="AutoBatch Antiflicker",
+            node_id="musefish_autobatch_antiflicker",
+            display_name="Musefish AutoBatch Antiflicker",
             search_aliases=["antiflicker", "flicker removal", "去频闪", "频闪抑制", "symmetric bilateral", "musefish antiflicker"],
             category="Musefish/Video",
             description=(
@@ -356,13 +361,118 @@ class AutoBatchAntiflicker(io.ComfyNode):
         return io.NodeOutput(result.to(out_device))
 
 
+_SHARED_NOISE_LOCK = threading.Lock()
+
+
+def _sampler_draws_own_noise(sampler) -> bool:
+    """True when the sampler draws its own randn (no ``noise_sampler`` hook)."""
+    function = getattr(sampler, "sampler_function", None)
+    if function is None:
+        return False
+    try:
+        params = inspect.signature(function).parameters
+    except (TypeError, ValueError):
+        return False
+    if "noise_sampler" in params:
+        return False  # handled by _batch_invariant_sampler
+    try:
+        source = inspect.getsource(function)
+    except (OSError, TypeError):
+        return False
+    return "randn" in source or "normal_(" in source
+
+
+@contextlib.contextmanager
+def _shared_frame_noise(batch: int, seed: int, noise_template: torch.Tensor):
+    """Make any in-sampler randn draw ONE frame repeated across the batch.
+
+    ``_batch_invariant_sampler`` covers every sampler with a ``noise_sampler``
+    hook (lcm, the sde family). The few that call ``torch.randn_like``
+    themselves — euler/heun/dpm_2 with ``s_churn > 0`` — would still give each
+    batch slot different noise, so the draw is forced to a single frame here.
+    The patch is scoped to the sampling call, restored in ``finally``, and
+    skipped when another thread is already sampling, so it can never leak into
+    model code or another prompt.
+    """
+    if batch <= 1 or not _SHARED_NOISE_LOCK.acquire(blocking=False):
+        yield False
+        return
+    original_randn, original_randn_like = torch.randn, torch.randn_like
+    state = {"step": 0}
+
+    def one_frame(shape: tuple[int, ...], kwargs: dict) -> torch.Tensor:
+        state["step"] += 1
+        generator = kwargs.pop("generator", None)
+        device = kwargs.get("device") or noise_template.device
+        if generator is None or generator.device != torch.device(device):
+            generator = torch.Generator(device=device)
+            generator.manual_seed((int(seed) * 1000003 + state["step"]) % (2 ** 63 - 1))
+        frame = original_randn((1, *shape[1:]), generator=generator, **kwargs)
+        return frame.repeat(batch, *([1] * (frame.dim() - 1)))
+
+    def randn(*size, **kwargs):
+        shape = size[0] if len(size) == 1 and isinstance(size[0], (tuple, list)) else size
+        return one_frame(tuple(shape), kwargs)
+
+    def randn_like(tensor, **kwargs):
+        kwargs.setdefault("dtype", tensor.dtype)
+        kwargs.pop("memory_format", None)  # randn takes no memory_format
+        return one_frame(tuple(tensor.shape), kwargs)
+
+    torch.randn, torch.randn_like = randn, randn_like
+    try:
+        yield True
+    finally:
+        torch.randn, torch.randn_like = original_randn, original_randn_like
+        _SHARED_NOISE_LOCK.release()
+
+
+def _batch_invariant_sampler(sampler, noise_template: torch.Tensor, batch: int, seed: int):
+    """Wrap a stochastic sampler so its per-step noise cannot depend on batch size.
+
+    ComfyUI's samplers call ``default_noise_sampler(x)``, which draws
+    ``torch.randn(x.size())``: inside a batched call every frame gets different
+    noise, so identical inputs diverge and changing ``batch`` changes results.
+    Samplers that expose ``noise_sampler`` (lcm, the sde family) are wrapped with a
+    sampler that draws ONE frame per step and repeats it — same compute as before,
+    no per-frame calls. Deterministic samplers are returned untouched.
+    """
+    sampler_function = getattr(sampler, "sampler_function", None)
+    if sampler_function is None:
+        return sampler
+    try:
+        accepts_noise = "noise_sampler" in inspect.signature(sampler_function).parameters
+    except (TypeError, ValueError):
+        return sampler
+    if not accepts_noise:
+        return sampler
+
+    step = {"n": 0}
+
+    def repeat_noise(sigma, sigma_next):
+        step["n"] += 1
+        generator = torch.Generator(device=noise_template.device)
+        generator.manual_seed((int(seed) * 1000003 + step["n"]) % (2 ** 63 - 1))
+        frame = torch.randn(
+            noise_template.shape, generator=generator, device=noise_template.device,
+            dtype=noise_template.dtype, layout=noise_template.layout,
+        )
+        return frame.repeat(batch, *([1] * (frame.dim() - 1)))
+
+    return comfy.samplers.KSAMPLER(
+        functools.partial(sampler_function, noise_sampler=repeat_noise),
+        getattr(sampler, "extra_options", {}),
+        getattr(sampler, "inpaint_options", {}),
+    )
+
+
 class MusefishPiDBatchVideoUpscale(io.ComfyNode):
     """Batch PiD upscaler with one model lifecycle per node execution."""
 
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="MusefishPiDBatchVideoUpscale",
+            node_id="musefish_pid_batch_video_upscale",
             display_name="Musefish PiD Batch Video Upscale",
             search_aliases=["pid video upscale", "batch video upscale", "video super resolution"],
             category="Musefish/Video",
@@ -533,7 +643,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                     while cache_offset < lowres_cpu.shape[0]:
                         current_batch = min(preferred_batch, lowres_cpu.shape[0] - cache_offset)
                         while True:
-                            lowres = latent_image = positive_pid = noise = samples = decoded = None
+                            lowres = latent_image = positive_pid = noise = batch_sampler = samples = decoded = None
                             try:
                                 lowres = lowres_cpu[cache_offset : cache_offset + current_batch].to(latent_device)
                                 latent_image = torch.zeros(
@@ -545,10 +655,17 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                                     positive, lowres, latent_format, degrade_sigma
                                 )
                                 if noise_template is None:
-                                    # A single seed-derived frame is repeated for every
-                                    # frame, so changing batch boundaries cannot change noise.
+                                    # One seed-derived frame; every frame in every batch
+                                    # starts from exactly these values.
                                     noise_template = comfy.sample.prepare_noise(latent_image[:1], int(seed))
-                                noise = noise_template.repeat(current_batch, 1, 1, 1)
+                                # A view, not a copy: the initial noise is identical for
+                                # every frame and consumers only read it (108 MiB/frame
+                                # was copied once per batch for nothing).
+                                noise = (noise_template if current_batch == 1
+                                         else noise_template.expand(current_batch, -1, -1, -1))
+                                batch_sampler = _batch_invariant_sampler(
+                                    sampler, noise_template, current_batch, int(seed)
+                                )
                                 # cfg=1 has one fixed LQ branch. The cache
                                 # scope is exactly this sample batch, so a
                                 # retry, next batch, or other cfg cannot reuse
@@ -556,14 +673,19 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                                     float(cfg) == 1.0
                                     and _pid_lq_cache_safe_path(positive_pid, sampling_model)
                                 )
-                                with pid_lq_projection_cache(
+                                noise_guard = (
+                                    _shared_frame_noise(current_batch, int(seed), noise_template)
+                                    if _sampler_draws_own_noise(batch_sampler)
+                                    else contextlib.nullcontext()
+                                )
+                                with noise_guard, pid_lq_projection_cache(
                                     sampling_model, enabled=cache_enabled
                                 ):
                                     samples = comfy.sample.sample_custom(
                                         sampling_model,
                                         noise,
                                         cfg,
-                                        sampler,
+                                        batch_sampler,
                                         sigmas,
                                         positive_pid,
                                         negative,
@@ -574,20 +696,25 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                                 # PiD predicts pixels in [-1, 1], not a learned VAE
                                 # latent. Convert on CPU in float32: a pixel_space
                                 # VAE call would offload PiD and round through BF16.
-                                decoded = samples.detach().to(device="cpu", dtype=torch.float32, copy=True)
+                                # sample_custom already returns Comfy's CPU float32
+                                # intermediates, so `copy=True` only added a second
+                                # frame-sized buffer per batch (~108 MiB/frame at 4x).
+                                decoded = samples.detach().to(device="cpu", dtype=torch.float32)
                                 decoded.add_(1.0).mul_(0.5).clamp_(0.0, 1.0)
                                 decoded = decoded.movedim(1, -1)
                                 if int(upscale_factor) != _MODEL_SCALE:
                                     decoded = comfy.utils.common_upscale(
                                         decoded.movedim(-1, 1), output_w, output_h, "area", "disabled"
                                     ).movedim(1, -1)
-                                output_images[output_start + cache_offset : output_start + cache_offset + current_batch] = (
-                                    decoded[:, :, :, :3].clamp(0.0, 1.0)
-                                )
+                                    decoded.clamp_(0.0, 1.0)
+                                output_images[
+                                    output_start + cache_offset :
+                                    output_start + cache_offset + current_batch
+                                ].copy_(decoded[:, :, :, :3])
                             except (MemoryError, RuntimeError, torch.cuda.OutOfMemoryError) as error:
                                 if not _is_oom_error(error):
                                     raise
-                                lowres = latent_image = positive_pid = noise = samples = decoded = None
+                                lowres = latent_image = positive_pid = noise = batch_sampler = samples = decoded = None
                                 error.__traceback__ = None
                                 _release_after_oom(comfy.model_management.get_torch_device())
                                 if current_batch > 1:
@@ -598,7 +725,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
                                     "Musefish PiD could not process a single frame without OOM"
                                 ) from error
                             finally:
-                                del lowres, latent_image, positive_pid, noise, samples, decoded
+                                del lowres, latent_image, positive_pid, noise, batch_sampler, samples, decoded
                             cache_offset += current_batch
                             comfy.model_management.throw_exception_if_processing_interrupted()
                             break
@@ -619,7 +746,7 @@ class MusefishPiDBatchVideoUpscale(io.ComfyNode):
 
 
 # ---------------------------------------------------------------------------
-# AutoBatch Image Sharpen FS — frequency-separation sharpening with bounded
+# Musefish AutoBatch Image Sharpen FS — frequency-separation sharpening with bounded
 # float32 GPU batches sized to free VRAM; the low-pass blur stays on CPU and
 # preserves float precision for long 4K sequences.
 # ---------------------------------------------------------------------------
@@ -759,8 +886,8 @@ class AutoBatchImageSharpenFS(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="AutoBatchImageSharpenFS",
-            display_name="AutoBatch Image Sharpen FS",
+            node_id="musefish_autobatch_image_sharpen_fs",
+            display_name="Musefish AutoBatch Image Sharpen FS",
             search_aliases=["autobatch sharpen", "频率分离锐化", "自动分批锐化"],
             category="Musefish/Image",
             description=(
@@ -859,7 +986,7 @@ class AutoBatchImageSharpenFS(io.ComfyNode):
 class MusefishExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS, MusefishUniverSRModel, MusefishUniverSRGeneralAudio, MusefishUniverSRSpeechAudio, MusefishDLSS5NeuralRender, MusefishDLSS5VideoStream, MusefishVideoDownload, MusefishWeChatChannels]
+        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS, MusefishUniverSRModel, MusefishUniverSRGeneralAudio, MusefishUniverSRSpeechAudio, MusefishDLSS5NeuralRender, MusefishDLSS5VideoStream, MusefishVideoDownload, MusefishWeChatChannels, MusefishFileDownload]
 
 
 async def comfy_entrypoint() -> MusefishExtension:

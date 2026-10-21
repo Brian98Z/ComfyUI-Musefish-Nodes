@@ -3,16 +3,16 @@
 ## Features and Quick Start
 
 - **`Musefish PiD Batch Video Upscale`**: 4× PiD video upscaling (fixed 1024 → 4096 path), reusing the same noise template across batches to keep frames temporally stable.
-- **`AutoBatch Antiflicker`**: Symmetric temporal bilateral filtering suppresses flicker without smearing motion edges; `frames_per_batch=0` enables automatic batching and `device=auto` enables CPU offload.
-- **`AutoBatch Image Sharpen FS`**: Frequency-separation sharpening (`hard`/`linear light`) for soft edges in 4K upscales; also supports automatic batching and CPU offload.
+- **`Musefish AutoBatch Antiflicker`**: Symmetric temporal bilateral filtering suppresses flicker without smearing motion edges; `frames_per_batch=0` enables automatic batching and `device=auto` enables CPU offload.
+- **`Musefish AutoBatch Image Sharpen FS`**: Frequency-separation sharpening (`hard`/`linear light`) for soft edges in 4K upscales; also supports automatic batching and CPU offload.
 
-**Quick start:** PiD upscale output → `AutoBatch Antiflicker` → `AutoBatch Image Sharpen FS` → `VHS_VideoCombine`. For portraits, use the template's low-halo settings: excessive sharpening can turn hairlines, eyelids, and cheek contours into grainy, fragmented edges.
+**Quick start:** PiD upscale output → `Musefish AutoBatch Antiflicker` → `Musefish AutoBatch Image Sharpen FS` → `VHS_VideoCombine`. For portraits, use the template's low-halo settings: excessive sharpening can turn hairlines, eyelids, and cheek contours into grainy, fragmented edges.
 
-Example template workflow: `workflows/Musefish_PiD_Batch_Video_Upscale.json` (UUID: `d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`). The template connects `AutoBatchAntiflicker` after PiD, followed by adaptive sharpening and video combination.
+Example template workflow: `workflows/Musefish_PiD_Batch_Video_Upscale.json` (UUID: `d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`). The template connects `musefish_autobatch_antiflicker` after PiD, followed by adaptive sharpening and video combination.
 
-### AutoBatch Antiflicker
+### Musefish AutoBatch Antiflicker
 
-Node ID: `AutoBatchAntiflicker`
+Node ID: `musefish_autobatch_antiflicker`
 
 **Function:** Applies symmetric, brightness-guided temporal bilateral filtering across preceding and following frames in an `IMAGE` batch. It suppresses local flicker while rejecting motion edges, avoiding the trails caused by one-way temporal recursion. Implemented in `musefish_nodes.py`; it does not depend on or modify `VideoHelperSuite`.
 
@@ -26,7 +26,7 @@ Node ID: `AutoBatchAntiflicker`
 Recommended connections:
 
 ```text
-VHS_LoadVideo IMAGE ──→ AutoBatchAntiflicker ──→ VHS_VideoCombine IMAGE
+VHS_LoadVideo IMAGE ──→ musefish_autobatch_antiflicker ──→ VHS_VideoCombine IMAGE
 VHS_LoadVideo AUDIO ─────────────────────────→ VHS_VideoCombine audio
 ```
 
@@ -43,9 +43,9 @@ Recommended starting values are `15/20` and `device=auto`. The 16 GB reference t
 
 If the subject shows trails, first lower `luma_tmp`. If only background colors flicker, leave the brightness setting unchanged and raise `chroma_tmp` alone. Do not raise both parameters substantially at the same time.
 
-### AutoBatch Image Sharpen FS
+### Musefish AutoBatch Image Sharpen FS
 
-Node ID: `AutoBatchImageSharpenFS`
+Node ID: `musefish_autobatch_image_sharpen_fs`
 
 **Function:** Float-based frequency-separation sharpening. It uses float32 batched computation, soft thresholding, and luminance-gradient edge protection to reduce amplification of low-amplitude noise and contour high frequencies. It is no longer pixel-for-pixel equivalent to the old RES4LYF output.
 
@@ -100,8 +100,8 @@ LoadVideo
   ├── AUDIO ───────────────────────────────┐
   └── FPS ─────────────────────────────────┤
                                            ▼
-Musefish PiD Batch Video Upscale → AutoBatch Antiflicker(15/20/1/auto)
-                                  → AutoBatch Image Sharpen FS(hard/gaussian/6/1/auto, amount=0.45, noise_threshold=0.01)
+Musefish PiD Batch Video Upscale → Musefish AutoBatch Antiflicker(15/20/1/auto)
+                                  → Musefish AutoBatch Image Sharpen FS(hard/gaussian/6/1/auto, amount=0.45, noise_threshold=0.01)
                                   → VHS_VideoCombine(yuv420p)
 ```
 
@@ -111,7 +111,7 @@ PiD's original `VIDEO` output does not pass through the subsequent image-process
 
 #### Musefish PiD Batch Video Upscale
 
-Node ID: `MusefishPiDBatchVideoUpscale`
+Node ID: `musefish_pid_batch_video_upscale`
 
 **Function:** Sends `IMAGE` frames from a video loader to the PiD model in batches and outputs upscaled `VIDEO` and `IMAGE` frames in their original order. Optional audio and input frame rate are carried into the `VIDEO` output.
 

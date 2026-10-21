@@ -3,17 +3,17 @@
 ## 功能与快速上手
 
 - **`Musefish PiD Batch Video Upscale`**：PiD 视频 4x 超分（固定 1024 → 4096 路径），批次间复用同一噪声模板保证帧间稳定
-- **`AutoBatch Antiflicker`**：对称时间双边滤波去频闪，运动边缘不拖影；`frames_per_batch=0` 自动分批 + `device=auto` CPU 卸载
-- **`AutoBatch Image Sharpen FS`**：频率分离锐化（hard/linear light），针对 4K 超分软边；同样自动分批 + CPU 卸载
+- **`Musefish AutoBatch Antiflicker`**：对称时间双边滤波去频闪，运动边缘不拖影；`frames_per_batch=0` 自动分批 + `device=auto` CPU 卸载
+- **`Musefish AutoBatch Image Sharpen FS`**：频率分离锐化（hard/linear light），针对 4K 超分软边；同样自动分批 + CPU 卸载
 
-**快速上手**：PiD 超分输出 → `AutoBatch Antiflicker` → `AutoBatch Image Sharpen FS` → `VHS_VideoCombine`。人像推荐使用模板的低毛刺参数，避免强锐化把发际线、眼睑和脸颊轮廓变成颗粒碎边。
+**快速上手**：PiD 超分输出 → `Musefish AutoBatch Antiflicker` → `Musefish AutoBatch Image Sharpen FS` → `VHS_VideoCombine`。人像推荐使用模板的低毛刺参数，避免强锐化把发际线、眼睑和脸颊轮廓变成颗粒碎边。
 
 示例模板工作流：`workflows/Musefish_PiD_Batch_Video_Upscale.json`（UUID：`d7de7df1-0bb0-4cf8-bb1e-6f7ee7c5d1d2`）。
-该模板在 PiD 输出后接入 `AutoBatchAntiflicker`，再进行自适应锐化与视频合并。
+该模板在 PiD 输出后接入 `musefish_autobatch_antiflicker`，再进行自适应锐化与视频合并。
 
-## AutoBatch Antiflicker
+## Musefish AutoBatch Antiflicker
 
-节点 ID：`AutoBatchAntiflicker`
+节点 ID：`musefish_autobatch_antiflicker`
 
 功能：对 `IMAGE` 帧批次执行前后帧对称、亮度引导的时间双边滤波，抑制局部频闪，同时拒绝运动边缘，避免单向时间递归造成拖影。实现位于 `musefish_nodes.py`，不依赖或修改 `VideoHelperSuite`。
 
@@ -27,7 +27,7 @@
 推荐连接：
 
 ```text
-VHS_LoadVideo IMAGE ──→ AutoBatchAntiflicker ──→ VHS_VideoCombine IMAGE
+VHS_LoadVideo IMAGE ──→ musefish_autobatch_antiflicker ──→ VHS_VideoCombine IMAGE
 VHS_LoadVideo AUDIO ─────────────────────────→ VHS_VideoCombine audio
 ```
 
@@ -44,9 +44,9 @@ VHS_LoadVideo AUDIO ────────────────────
 
 如果主体出现拖影，优先降低 `luma_tmp`；如果只有背景颜色跳变，保持亮度参数不变、单独提高 `chroma_tmp`。不要把两个参数同时大幅提高。
 
-## AutoBatch Image Sharpen FS
+## Musefish AutoBatch Image Sharpen FS
 
-节点 ID：`AutoBatchImageSharpenFS`
+节点 ID：`musefish_autobatch_image_sharpen_fs`
 
 功能：基于频率分离的浮点锐化。使用 float32 分批运算、软阈值与亮度梯度边缘保护，减少低幅噪声和轮廓高频被过度增强；不再与旧 RES4LYF 输出逐像素等价。
 
@@ -101,8 +101,8 @@ LoadVideo
   ├── AUDIO ───────────────────────────────┐
   └── FPS ─────────────────────────────────┤
                                            ▼
-Musefish PiD Batch Video Upscale → AutoBatch Antiflicker(15/20/1/auto)
-                                  → AutoBatch Image Sharpen FS(hard/gaussian/6/1/auto, amount=0.45, noise_threshold=0.01)
+Musefish PiD Batch Video Upscale → Musefish AutoBatch Antiflicker(15/20/1/auto)
+                                  → Musefish AutoBatch Image Sharpen FS(hard/gaussian/6/1/auto, amount=0.45, noise_threshold=0.01)
                                   → VHS_VideoCombine(yuv420p)
 ```
 
@@ -112,7 +112,7 @@ PiD 的原始 `VIDEO` 输出不经过后续图像节点；最终交付应使用�
 
 ### Musefish PiD Batch Video Upscale
 
-节点 ID：`MusefishPiDBatchVideoUpscale`
+节点 ID：`musefish_pid_batch_video_upscale`
 
 功能：将视频加载节点输出的 `IMAGE` 帧批量送入 PiD 模型，按原始顺序输出超分后的 `VIDEO` 与 `IMAGE`。可选音频和输入帧率会写入 `VIDEO` 输出。
 

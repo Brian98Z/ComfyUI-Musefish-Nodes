@@ -13,29 +13,29 @@
  */
 import { app } from "../../../scripts/app.js";
 
-const NODE_TYPES = ["MusefishUniverSRGeneralAudio", "MusefishUniverSRSpeechAudio"];
+const NODE_TYPES = ["musefish_universr_general_audio", "musefish_universr_speech_audio"];
 /** Widgets the matcher decides: hidden while the switch is on. Mirrors the governed inputs in
  *  musefish_audio.py. */
 const GOVERNED_WIDGETS = ["input_sr", "ode_steps", "guidance"];
 const TOGGLE_WIDGET = "auto_params";
 /** Widget order each node type had before the switch moved to the front. */
 const LEGACY_WIDGET_ORDER = {
-  MusefishUniverSRGeneralAudio: [
+  musefish_universr_general_audio: [
     "mode", "input_sr", "channel_mode", "ode_method", "ode_steps", "guidance", "chunk_sec", "seed",
     "control_after_generate", "deess", "auto_params",
   ],
-  MusefishUniverSRSpeechAudio: [
+  musefish_universr_speech_audio: [
     "input_sr", "channel_mode", "ode_method", "ode_steps", "guidance", "chunk_sec", "seed",
     "control_after_generate", "deess", "auto_params",
   ],
 };
 /** Widget order the nodes register today; mirrors the schema in musefish_audio.py. */
 const CURRENT_WIDGET_ORDER = {
-  MusefishUniverSRGeneralAudio: [
+  musefish_universr_general_audio: [
     "auto_params", "input_sr", "ode_steps", "guidance", "mode", "channel_mode", "ode_method",
     "chunk_sec", "seed", "control_after_generate", "deess", "accel",
   ],
-  MusefishUniverSRSpeechAudio: [
+  musefish_universr_speech_audio: [
     "auto_params", "input_sr", "ode_steps", "guidance", "channel_mode", "ode_method", "chunk_sec",
     "seed", "control_after_generate", "deess", "accel",
   ],

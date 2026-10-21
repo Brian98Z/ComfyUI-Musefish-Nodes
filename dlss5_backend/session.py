@@ -35,8 +35,10 @@ from __future__ import annotations
 
 import json
 import os
+import queue
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from multiprocessing import shared_memory
@@ -125,6 +127,7 @@ class DLSS5Session:
                               for shm in self._output_shms]
         self._head = 0
         self._pending: deque[int] = deque()
+        self._events: "queue.Queue[bytes | None]" = queue.Queue()
 
         self._request = {
             "op": "init",
@@ -155,9 +158,24 @@ class DLSS5Session:
             env=environment,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
+            # The worker logs to its own file; an unread stderr pipe would fill
+            # (64 KiB) and block the worker mid-frame.
+            stderr=subprocess.DEVNULL,
             creationflags=creationflags,
         )
+        self._events = queue.Queue()
+        stream = self._proc.stdout
+
+        def pump() -> None:
+            try:
+                for line in stream:
+                    self._events.put(line)
+            except (ValueError, OSError):
+                pass
+            finally:
+                self._events.put(None)  # EOF sentinel
+
+        threading.Thread(target=pump, daemon=True, name="dlss5-worker-reader").start()
         try:
             ready = self._read_event(timeout=600.0)  # NGX shader compile can take minutes on a new driver
         except DLSS5Error:
@@ -171,19 +189,29 @@ class DLSS5Session:
         if self._proc is None or self._proc.stdout is None:
             raise DLSS5Error("worker pipe unavailable")
         deadline = time.monotonic() + timeout
-        # readline blocks; poll liveness so a crashed worker fails fast instead
-        # of blocking on a dead pipe.
+        # Events arrive on a reader thread: a worker stuck inside NGX cannot hold
+        # this call past the deadline the way a blocking readline() did.
         while True:
-            line = self._proc.stdout.readline()
-            if line:
-                break
-            code = self._proc.poll()
-            if code is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise DLSS5Error(
+                    f"DLSS5 worker timed out after {timeout:g}s: {self._log_tail() or 'no diagnostics'}")
+            try:
+                line = self._events.get(timeout=min(remaining, 0.5))
+            except queue.Empty:
+                code = self._proc.poll()
+                if code is not None:
+                    detail = self._log_tail() or "no diagnostics"
+                    raise DLSS5Error(f"DLSS5 worker exited (code {code}): {detail}")
+                continue
+            if line is None:
+                try:
+                    code = self._proc.wait(timeout=1.0)
+                except subprocess.TimeoutExpired:
+                    code = "unknown"
                 detail = self._log_tail() or "no diagnostics"
                 raise DLSS5Error(f"DLSS5 worker exited (code {code}): {detail}")
-            if time.monotonic() > deadline:
-                raise DLSS5Error(f"DLSS5 worker timed out after {timeout:.0f}s: {self._log_tail() or 'no diagnostics'}")
-            time.sleep(0.05)
+            break
         text = line.decode("utf-8", errors="replace").strip()
         if not text:
             raise DLSS5Error("empty worker response")

@@ -188,7 +188,7 @@ class MusefishVideoDownload(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="MusefishVideoDownload",
+            node_id="musefish_video_downloader",
             display_name="Musefish Video Download",
             search_aliases=["download", "视频下载", "yt-dlp", "视频号", "bilibili", "douyin"],
             category="Musefish/Video",
@@ -353,7 +353,7 @@ class MusefishWeChatChannels(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="MusefishWeChatChannels",
+            node_id="musefish_wc_video_channels",
             display_name="Musefish WC Video Channels",
             search_aliases=["视频号", "视频号下载", "视频号解密", "decode_key", "内存扫描", "key scan", "wx decrypt", "channels"],
             category="Musefish/Video",

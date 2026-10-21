@@ -82,9 +82,9 @@ def _sharpen(
 
 
 def test_video_node_ids_and_trailing_optional_controls():
-    assert musefish.MusefishPiDBatchVideoUpscale.GET_SCHEMA().node_id == "MusefishPiDBatchVideoUpscale"
-    assert musefish.AutoBatchAntiflicker.GET_SCHEMA().node_id == "AutoBatchAntiflicker"
-    assert musefish.AutoBatchImageSharpenFS.GET_SCHEMA().node_id == "AutoBatchImageSharpenFS"
+    assert musefish.MusefishPiDBatchVideoUpscale.GET_SCHEMA().node_id == "musefish_pid_batch_video_upscale"
+    assert musefish.AutoBatchAntiflicker.GET_SCHEMA().node_id == "musefish_autobatch_antiflicker"
+    assert musefish.AutoBatchImageSharpenFS.GET_SCHEMA().node_id == "musefish_autobatch_image_sharpen_fs"
 
     pid_parameters = list(inspect.signature(musefish.MusefishPiDBatchVideoUpscale.execute).parameters)
     assert pid_parameters[:4] == ["images", "audio", "frame_rate", "model"]
@@ -322,6 +322,8 @@ def test_pid_batch_boundary_reuses_seed_noise_and_preserves_order(monkeypatch):
 
     assert output_images.shape[0] == images.shape[0]
     assert noise_calls == [((1, 3, 16, 16), 1234)]
+    # Batch boundaries still do not change results: batching is kept, but the
+    # sampler's per-step noise is drawn once per step and repeated across the batch.
     assert sample_calls == [(2, 1234), (2, 1234), (1, 1234)]
     # This is a mocked sampler-boundary check, not a claim about model fidelity.
     frame_means = output_images.mean(dim=(1, 2, 3))
@@ -329,15 +331,27 @@ def test_pid_batch_boundary_reuses_seed_noise_and_preserves_order(monkeypatch):
 
 
 def test_pid_oom_reduces_only_the_active_batch_and_retries(monkeypatch):
-    model, clip, encode_vae, _, sample_calls = _install_pid_boundary_stubs(monkeypatch, oom_once=True)
+    model, clip, encode_vae, _, sample_calls = _install_pid_boundary_stubs(monkeypatch)
+    real_conditioning = musefish._pid_conditioning
+    seen = []
+
+    def conditioning_with_oom(positive, lowres, latent_format, degrade_sigma):
+        seen.append(int(lowres.shape[0]))
+        if not hasattr(conditioning_with_oom, "raised") and lowres.shape[0] > 2:
+            conditioning_with_oom.raised = True
+            raise torch.cuda.OutOfMemoryError("simulated OOM for a large batch")
+        return real_conditioning(positive, lowres, latent_format, degrade_sigma)
+
+    monkeypatch.setattr(musefish, "_pid_conditioning", conditioning_with_oom)
     images = torch.rand((5, 2, 2, 3), generator=torch.Generator().manual_seed(12))
     kwargs = _pid_kwargs(images, batch_size=4)
     kwargs.update(model=model, clip=clip, encode_vae=encode_vae)
     output = musefish.MusefishPiDBatchVideoUpscale.execute(**kwargs)
     assert _tensor_output(output, 1).shape[0] == 5
-    assert sample_calls[0][0] == 4
-    assert sample_calls[1][0] < sample_calls[0][0]
-    assert sum(batch for batch, _ in sample_calls[1:]) == 5
+    # The 4-frame batch OOMs and the retry halves only the active batch.
+    assert seen[0] == 4 and seen[1] == 2
+    assert sample_calls[0][0] == 2      # first completed call after the halving
+    assert sum(batch for batch, _ in sample_calls) == 5
 
 def test_pid_pixel_decode_is_float32_affine_and_does_not_mutate_input(monkeypatch):
     model, clip, encode_vae, _, _ = _install_pid_boundary_stubs(monkeypatch)
@@ -362,3 +376,75 @@ def test_pid_non_oom_exception_is_not_swallowed(monkeypatch):
     kwargs.update(model=model, clip=clip, encode_vae=encode_vae)
     with pytest.raises(RuntimeError, match="sampler configuration is invalid"):
         musefish.MusefishPiDBatchVideoUpscale.execute(**kwargs)
+
+
+def test_batch_invariant_sampler_repeats_one_frame_per_step():
+    """The wrapper must give every batch slot the same noise, independent of batch size."""
+    calls = {}
+
+    def fake_sample_step(model, x, sigmas, extra_args=None, callback=None, disable=None,
+                         noise_sampler=None, s_noise=1.0):
+        calls["per_step"] = [noise_sampler(torch.tensor(1.0), torch.tensor(0.0)).clone()
+                             for _ in range(3)]
+        return x
+
+    wrapped = musefish._batch_invariant_sampler(
+        musefish.comfy.samplers.KSAMPLER(fake_sample_step),
+        torch.ones(1, 3, 4, 4),
+        batch=2,
+        seed=1234,
+    )
+    assert wrapped is not None and wrapped.sampler_function is not fake_sample_step
+    wrapped.sampler_function(None, torch.zeros(2, 3, 4, 4), None)
+    steps = calls["per_step"]
+    assert len(steps) == 3
+    for noise in steps:
+        assert noise.shape == (2, 3, 4, 4)
+        assert torch.equal(noise[0], noise[1])          # identical across the batch
+    assert not torch.equal(steps[0][0], steps[1][0])      # still varies per step
+
+    # deterministic samplers without a noise_sampler parameter stay untouched
+    def deterministic(model, x, sigmas, extra_args=None, callback=None, disable=None):
+        return x
+
+    plain = musefish.comfy.samplers.KSAMPLER(deterministic)
+    assert musefish._batch_invariant_sampler(plain, torch.ones(1, 3, 4, 4), 2, 1) is plain
+
+
+def test_sampler_noise_detection_matches_comfy_samplers():
+    """Hook-based samplers are wrapped; self-noising ones use the scoped guard."""
+    lcm = musefish.comfy.samplers.sampler_object("lcm")
+    euler = musefish.comfy.samplers.sampler_object("euler")
+    dpmpp = musefish.comfy.samplers.sampler_object("dpmpp_2m")
+    assert not musefish._sampler_draws_own_noise(lcm)      # noise_sampler hook
+    assert musefish._sampler_draws_own_noise(euler)        # torch.randn_like
+    assert not musefish._sampler_draws_own_noise(dpmpp)    # deterministic
+
+
+def test_shared_frame_noise_patches_only_inside_the_scope():
+    original_randn, original_randn_like = torch.randn, torch.randn_like
+    template = torch.zeros(1, 3, 4, 4)
+    with musefish._shared_frame_noise(2, 1234, template) as active:
+        assert active is True
+        draw = torch.randn((2, 3, 4, 4))
+        assert draw.shape == (2, 3, 4, 4)
+        assert torch.equal(draw[0], draw[1])               # identical per frame
+        like = torch.randn_like(torch.zeros(2, 3, 4, 4))
+        assert torch.equal(like[0], like[1])
+    assert torch.randn is original_randn and torch.randn_like is original_randn_like
+    assert not torch.equal(torch.randn((2, 3, 4, 4))[0], torch.randn((2, 3, 4, 4))[1])
+
+
+def test_euler_with_churn_is_batch_invariant_inside_guard():
+    """A self-noising sampler must produce identical frames for a 2-frame batch."""
+    sigmas = torch.tensor([1.0, 0.5, 0.0])
+
+    def model_fn(x, sigma, **kwargs):
+        return torch.zeros_like(x)
+
+    x = torch.ones(2, 3, 4, 4)
+    with musefish._shared_frame_noise(2, 7, torch.zeros(1, 3, 4, 4)):
+        out = musefish.comfy.k_diffusion.sampling.sample_euler(
+            model_fn, x, sigmas, s_churn=1.0, s_noise=1.0
+        )
+    assert torch.equal(out[0], out[1])

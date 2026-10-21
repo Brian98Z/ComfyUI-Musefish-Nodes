@@ -81,13 +81,23 @@ def _configure_environment(request: dict) -> Path:
     if str(root.resolve()) not in sys.path: sys.path.insert(0, str(root.resolve()))
     return cache
 
+_GENERAL_DIR_NAMES = {"universr-audio", "models--woongzip1--universr-audio", "general"}
+_SPEECH_DIR_NAMES = {"universr-speech", "models--woongzip1--universr-speech", "speech"}
+
+
 def _model_directory(cache: Path, model_type: str) -> Path | None:
     name = "universr-audio" if model_type == "general" else "universr-speech"
     # "general"/"speech" are the directory names MusefishUniverSRModel writes, so a cache
     # root holding both of them serves sr and stem_mix (which needs both models at once).
-    candidates = (cache, cache / name, cache / model_type, cache / f"models--woongzip1--{name}",
-                  cache / "huggingface" / name, cache / "huggingface" / f"models--woongzip1--{name}")
+    # A cache that already *is* the other model's directory must never be reused: that made
+    # stem_mix load General twice and the speech node run General silently.
+    foreign = _SPEECH_DIR_NAMES if model_type == "general" else _GENERAL_DIR_NAMES
+    candidates = [] if cache.name.lower() in foreign else [cache]
+    candidates += [cache / name, cache / model_type, cache / f"models--woongzip1--{name}",
+                   cache / "huggingface" / name, cache / "huggingface" / f"models--woongzip1--{name}"]
     for candidate in candidates:
+        if not candidate.is_dir():
+            continue
         if (candidate / "config.yaml").is_file() and (candidate / "pytorch_model.bin").is_file(): return candidate
         snapshots = candidate / "snapshots"
         if snapshots.is_dir():
@@ -403,6 +413,8 @@ def _sr_mid_chunks(model, mid48: np.ndarray, input_sr: int, request: dict, temp_
     if starts[-1] + chunk < length: starts.append(max(length - chunk, 0))
     result = np.zeros(length); weights = np.zeros(length); ramp = np.linspace(0., 1., max(xf, 1)); total = len(starts)
     kwargs = dict(input_sr=input_sr, ode_method=str(request.get("ode_method", "midpoint")), ode_steps=int(request.get("ode_steps", 4)), guidance_scale=float(request.get("guidance", 1.5)))
+    # Chunks run back to back at the same shape: the caching allocator reuses the
+    # previous chunk's blocks, so flushing it per chunk only added cudaMalloc latency.
     for index, start in enumerate(starts):
         if cancel(): raise KeyboardInterrupt("cancelled")
         progress(p0 + int((p1 - p0) * index / max(total, 1)), f"super-resolution chunk {index + 1}/{total}")
@@ -418,10 +430,11 @@ def _sr_mid_chunks(model, mid48: np.ndarray, input_sr: int, request: dict, temp_
         used = min(len(out_np), expected, length - start)
         if used <= 0: continue
         local = np.ones(used)
-        if used > 2 * xf: local[:xf] = ramp; local[-xf:] = 1 - ramp[::-1]
+        # Incoming chunk fades in, outgoing chunk fades *out*: `1 - ramp[::-1]` is the
+        # rising ramp again, which left both chunks at weight 1 and hard-cut the seam.
+        if used > 2 * xf: local[:xf] = ramp; local[-xf:] = 1 - ramp
         elif used > xf: local[:xf] = ramp
         result[start:start + used] += out_np[:used] * local; weights[start:start + used] += local
-        if torch.cuda.is_available(): torch.cuda.empty_cache()
     progress(p1, f"super-resolution complete ({total} chunks)")
     result /= np.maximum(weights, 1e-8)
     gain = np.sqrt(np.mean(mid48 * mid48) + 1e-12) / (np.sqrt(np.mean(result * result)) + 1e-12)

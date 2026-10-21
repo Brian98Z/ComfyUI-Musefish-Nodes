@@ -20,7 +20,7 @@
     },
     {
       "id": 2,
-      "type": "MusefishDLSS5VideoStream",
+      "type": "musefish_dlss5_video_stream",
       "pos": [470, 200],
       "size": [340, 290],
       "flags": {},
@@ -40,7 +40,7 @@
         {"name": "encoder", "type": "COMBO", "widget": {"name": "encoder"}, "link": null}
       ],
       "outputs": [{"name": "video", "type": "VIDEO", "links": [2]}],
-      "properties": {"aux_id": "Brian98Z/ComfyUI-Musefish-Nodes", "Node name for S&R": "MusefishDLSS5VideoStream"},
+      "properties": {"aux_id": "Brian98Z/ComfyUI-Musefish-Nodes", "Node name for S&R": "musefish_dlss5_video_stream"},
       "widgets_values": ["2× (Balance)", "default", "ultra", 1, 0.94, 0.84, 1, true, 19, "libx264（CPU 编码）"],
       "widgets_values_named": {"super_resolution": "2× (Balance)", "style": "default", "vsr_quality": "ultra", "intensity": 1, "local_tone": 0.94, "local_struct": 0.84, "skin_struct": 1, "use_auto_mask": true, "crf": 19, "encoder": "libx264（CPU 编码）"}
     },

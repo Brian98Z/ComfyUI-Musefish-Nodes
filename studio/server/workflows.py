@@ -69,7 +69,7 @@ def pid_video_graph(
         "5": {"class_type": "GetVideoComponents",
               "inputs": {"video": ["4", 0]}},
         "6": {
-            "class_type": "MusefishPiDBatchVideoUpscale",
+            "class_type": "musefish_pid_batch_video_upscale",
             "inputs": {
                 "images": ["5", 0],
                 "audio": ["5", 1],
@@ -95,12 +95,12 @@ def pid_video_graph(
     images_src = "6"
     if postprocess:
         g["7"] = {
-            "class_type": "AutoBatchAntiflicker",
+            "class_type": "musefish_autobatch_antiflicker",
             "inputs": {"images": ["6", 1], "luma_tmp": luma_tmp, "chroma_tmp": chroma_tmp,
                        "frames_per_batch": frames_per_batch, "device": pp_device},
         }
         g["8"] = {
-            "class_type": "AutoBatchImageSharpenFS",
+            "class_type": "musefish_autobatch_image_sharpen_fs",
             "inputs": {"images": ["7", 0], "method": sharpen_method, "blur_type": sharpen_blur,
                        "intensity": sharpen_intensity, "frames_per_batch": frames_per_batch,
                        "device": pp_device, "amount": sharpen_amount,
@@ -160,7 +160,7 @@ def pid_upscale_graph(
         "4": {"class_type": "LoadImage",
               "inputs": {"image": image_ref, "upload": "image"}},
         "5": {
-            "class_type": "MusefishPiDBatchVideoUpscale",
+            "class_type": "musefish_pid_batch_video_upscale",
             "inputs": {
                 "images": ["4", 0],
                 "audio": None,
@@ -186,7 +186,7 @@ def pid_upscale_graph(
     out = "5"
     if postprocess:
         g["6"] = {
-            "class_type": "AutoBatchAntiflicker",
+            "class_type": "musefish_autobatch_antiflicker",
             "inputs": {
                 "images": ["5", 1],
                 "luma_tmp": luma_tmp,
@@ -196,7 +196,7 @@ def pid_upscale_graph(
             },
         }
         g["7"] = {
-            "class_type": "AutoBatchImageSharpenFS",
+            "class_type": "musefish_autobatch_image_sharpen_fs",
             "inputs": {
                 "images": ["6", 0],
                 "method": sharpen_method,
@@ -232,7 +232,7 @@ def dlss5_image_graph(
         "1": {"class_type": "LoadImage",
               "inputs": {"image": image_ref, "upload": "image"}},
         "2": {
-            "class_type": "MusefishDLSS5NeuralRender",
+            "class_type": "musefish_dlss5_neural_render",
             "inputs": {
                 "images": ["1", 0],
                 "super_resolution": super_resolution,
@@ -271,7 +271,7 @@ def dlss5_video_graph(
     g = {
         "1": {"class_type": "LoadVideo", "inputs": {"file": video_ref}},
         "2": {
-            "class_type": "MusefishDLSS5VideoStream",
+            "class_type": "musefish_dlss5_video_stream",
             "inputs": {
                 "video": ["1", 0],
                 "super_resolution": super_resolution,
@@ -311,10 +311,10 @@ def universr_graph(
     accel: str = "cuDNN TF32",
 ) -> tuple[dict, str]:
     """LoadAudio -> UniverSR model + process -> SaveAudio."""
-    node_id = "MusefishUniverSRGeneralAudio" if model == "general" else "MusefishUniverSRSpeechAudio"
+    node_id = "musefish_universr_general_audio" if model == "general" else "musefish_universr_speech_audio"
     g = {
         "1": {"class_type": "LoadAudio", "inputs": {"audio": audio_ref}},
-        "2": {"class_type": "MusefishUniverSRModel",
+        "2": {"class_type": "musefish_universr_model",
               "inputs": {"model": model, "download": download}},
         "3": {
             "class_type": node_id,

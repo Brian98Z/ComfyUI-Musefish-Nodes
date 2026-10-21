@@ -13,7 +13,7 @@
  */
 import { app } from "../../../scripts/app.js";
 
-const NODE_TYPE = "MusefishVideoDownload";
+const NODE_TYPE = "musefish_video_downloader";
 const URL_WIDGET = "url";
 const SEGMENTS_WIDGET = "chunks";
 

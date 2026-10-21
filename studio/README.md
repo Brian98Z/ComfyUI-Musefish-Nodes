@@ -94,7 +94,11 @@ client\start_client.bat         # 桌面客户端（首次需 client\> npm insta
 | POST | `/api/comfy/start` · `/api/comfy/stop` | 引擎手动启停 |
 | POST | `/api/comfy/endpoint` | 切换引擎 `{host,port}`，持久化 |
 | POST | `/api/comfy/scan` | 自动扫描本机 ComfyUI 端口 |
-| GET | `/files/<job_id>/<file>` | 产物下载/内嵌播放（支持 HTTP Range） |
+| GET | `/files/<job_id>/<file>` | 产物下载/内嵌播放（支持 HTTP Range）；路径解析后必须落在 output 目录内，非媒体类型按附件返回 |
+
+**写操作鉴权**：`POST`/`PUT`/`DELETE` 必须带 `X-Musefish-Client: 1`。Studio 前端一直携带，
+作用是拦住浏览器里跨站页面伪造的简单请求（跨域自定义头会触发预检，预检不放行）。
+自己写脚本调用时同样要加这个头。
 
 ## 冒烟清单
 

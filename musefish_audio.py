@@ -9,6 +9,7 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import torch
@@ -126,13 +127,21 @@ def _universr_release_comfy_models() -> None:
         pass
 
 
-def _universr_run_worker(request: dict, scope: Path, batch_index: int, batch_total: int, log_lines: list[str], progress_bar) -> Path:
+def _universr_worker_command(request_paths: list[Path]) -> list[str]:
     worker = Path(__file__).resolve().parent / "audio_backend" / "worker.py"
-    request_path = scope / f"request_{batch_index:04d}.json"
-    stdout_path = scope / f"stdout_{batch_index:04d}.log"
-    stderr_path = scope / f"stderr_{batch_index:04d}.log"
-    request_path.write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
-    command = [sys.executable, "-X", "utf8", "-u", str(worker), "--request", str(request_path)]
+    if len(request_paths) == 1:
+        return [sys.executable, "-X", "utf8", "-u", str(worker), "--request", str(request_paths[0])]
+    return [sys.executable, "-X", "utf8", "-u", str(worker), "--requests",
+            *[str(path) for path in request_paths]]
+
+
+def _universr_stream_worker(command: list[str], stdout_path: Path, stderr_path: Path,
+                            on_event: Callable[[dict], None], log_lines: list[str]) -> tuple[int, str]:
+    """Run one worker process and feed every JSON event to ``on_event``.
+
+    Shared by the single-request and batch paths so supervision, cancellation
+    and log tailing cannot drift apart.
+    """
     environment = os.environ.copy()
     environment.update({"PYTHONUNBUFFERED": "1", "PYTHONUTF8": "1", "PYTHONIOENCODING": "utf-8"})
     creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
@@ -162,23 +171,15 @@ def _universr_run_worker(request: dict, scope: Path, batch_index: int, batch_tot
             except json.JSONDecodeError:
                 append_log(line)
                 continue
-            kind = event.get("type")
-            if kind == "progress":
-                percent = max(0, min(100, int(event.get("percent", 0))))
-                append_log(f"batch {batch_index + 1}/{batch_total}: {percent}% {str(event.get('message', '')).strip()}".strip())
-                try:
-                    progress_bar.update_absolute(batch_index * 100 + percent)
-                except Exception:
-                    pass
-            elif kind == "error":
+            if event.get("type") == "error":
                 seen_error = str(event.get("message", "")).strip()
                 append_log(f"worker error: {seen_error}")
-            elif kind == "result":
-                append_log(f"batch {batch_index + 1}/{batch_total}: complete")
+            on_event(event)
 
     try:
         with stdout_path.open("w", encoding="utf-8", newline="") as stdout, stderr_path.open("w", encoding="utf-8", newline="") as stderr:
-            process = subprocess.Popen(command, cwd=None, env=environment, stdout=stdout, stderr=stderr, creationflags=creationflags, start_new_session=(os.name != "nt"))
+            process = subprocess.Popen(command, cwd=None, env=environment, stdout=stdout, stderr=stderr,
+                                       creationflags=creationflags, start_new_session=(os.name != "nt"))
             while True:
                 comfy.model_management.throw_exception_if_processing_interrupted()
                 try:
@@ -189,30 +190,110 @@ def _universr_run_worker(request: dict, scope: Path, batch_index: int, batch_tot
                 except OSError:
                     chunk = ""
                 consume(chunk)
-                return_code = process.poll()
-                if return_code is not None:
+                if process.poll() is not None:
                     break
                 time.sleep(0.2)
-        try:
-            with stdout_path.open("r", encoding="utf-8", errors="replace") as progress:
-                progress.seek(offset)
-                consume(progress.read(256 * 1024), final=True)
-        except OSError:
-            consume("", final=True)
-        if process.returncode != 0:
-            detail = seen_error or _universr_tail(stderr_path) or _universr_tail(stdout_path)
-            raise RuntimeError(f"UniverSR worker failed (exit {process.returncode}): {detail or 'no diagnostics'}")
-        output = Path(str(request["output_path"]))
-        if not output.is_file():
-            detail = seen_error or _universr_tail(stderr_path) or _universr_tail(stdout_path)
-            raise RuntimeError(f"UniverSR worker produced no output WAV: {detail or output}")
-        return output
+        # Drain to EOF: a batch can leave far more than one read's worth of
+        # protocol lines behind, and an unread `result` would look like a
+        # missing output.
+        while True:
+            try:
+                with stdout_path.open("r", encoding="utf-8", errors="replace") as progress:
+                    progress.seek(offset)
+                    chunk = progress.read(256 * 1024)
+                    offset = progress.tell()
+            except OSError:
+                chunk = ""
+            if not chunk:
+                break
+            consume(chunk)
+        consume("", final=True)
+        return int(process.returncode or 0), seen_error
     except BaseException:
         if process is not None:
             _universr_terminate_tree(process)
         raise
 
 
+def _universr_run_worker(request: dict, scope: Path, batch_index: int, batch_total: int,
+                         log_lines: list[str], progress_bar) -> Path:
+    request_path = scope / f"request_{batch_index:04d}.json"
+    stdout_path = scope / f"stdout_{batch_index:04d}.log"
+    stderr_path = scope / f"stderr_{batch_index:04d}.log"
+    request_path.write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
+
+    def on_event(event: dict) -> None:
+        kind = event.get("type")
+        if kind == "progress":
+            percent = max(0, min(100, int(event.get("percent", 0))))
+            log_lines.append(f"batch {batch_index + 1}/{batch_total}: {percent}% "
+                             f"{str(event.get('message', '')).strip()}".strip())
+            try:
+                progress_bar.update_absolute(batch_index * 100 + percent)
+            except Exception:
+                pass
+        elif kind == "result":
+            log_lines.append(f"batch {batch_index + 1}/{batch_total}: complete")
+
+    code, seen_error = _universr_stream_worker(
+        _universr_worker_command([request_path]), stdout_path, stderr_path, on_event, log_lines)
+    if code != 0:
+        detail = seen_error or _universr_tail(stderr_path) or _universr_tail(stdout_path)
+        raise RuntimeError(f"UniverSR worker failed (exit {code}): {detail or 'no diagnostics'}")
+    output = Path(str(request["output_path"]))
+    if not output.is_file():
+        detail = seen_error or _universr_tail(stderr_path) or _universr_tail(stdout_path)
+        raise RuntimeError(f"UniverSR worker produced no output WAV: {detail or output}")
+    return output
+
+
+def _universr_run_worker_batch(requests: list[dict], scope: Path, batch_total: int,
+                               log_lines: list[str], progress_bar) -> list[Path]:
+    """One worker process, several requests: the checkpoint loads once per batch.
+
+    Every batch element used to spawn its own interpreter and reload the same
+    ~229 MB checkpoint; the worker now processes the ordered requests and exits,
+    so GPU memory is still released at the end of the node call.
+    """
+    request_paths = []
+    for index, request in enumerate(requests):
+        path = scope / f"request_{index:04d}.json"
+        path.write_text(json.dumps(request, ensure_ascii=False), encoding="utf-8")
+        request_paths.append(path)
+    stdout_path = scope / "stdout_batch.log"
+    stderr_path = scope / "stderr_batch.log"
+    produced: dict[int, Path] = {}
+    current = {"index": 0}
+
+    def on_event(event: dict) -> None:
+        kind = event.get("type")
+        index = int(event.get("index", current["index"]))
+        if kind == "start":
+            current["index"] = index
+            log_lines.append(f"batch {index + 1}/{batch_total}: worker start")
+        elif kind == "progress":
+            percent = max(0, min(100, int(event.get("percent", 0))))
+            current["index"] = index
+            log_lines.append(f"batch {index + 1}/{batch_total}: {percent}% "
+                             f"{str(event.get('message', '')).strip()}".strip())
+            try:
+                progress_bar.update_absolute(index * 100 + percent)
+            except Exception:
+                pass
+        elif kind == "result":
+            if event.get("output_path"):
+                produced[index] = Path(str(event["output_path"]))
+            log_lines.append(f"batch {index + 1}/{batch_total}: complete")
+
+    code, seen_error = _universr_stream_worker(
+        _universr_worker_command(request_paths), stdout_path, stderr_path, on_event, log_lines)
+    missing = [i for i in range(len(requests)) if i not in produced or not produced[i].is_file()]
+    if code != 0 or missing:
+        detail = seen_error or _universr_tail(stderr_path) or _universr_tail(stdout_path)
+        raise RuntimeError(
+            f"UniverSR worker failed (exit {code}, missing batches {missing or 'none'}): "
+            f"{detail or 'no diagnostics'}")
+    return [produced[i] for i in range(len(requests))]
 
 
 class MusefishUniverSRModel(io.ComfyNode):
@@ -221,7 +302,7 @@ class MusefishUniverSRModel(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="MusefishUniverSRModel",
+            node_id="musefish_universr_model",
             display_name="Musefish UniverSR Model",
             search_aliases=["universr model", "download universr", "audio model cache"],
             category="Musefish/Audio",
@@ -330,6 +411,7 @@ def _universr_execute_audio(
     result_batches: list[torch.Tensor] = []
     logs: list[str] = [f"UniverSR: mode={mode}, model={model}, input_sr={'auto' if auto_input_sr else chosen_rate}, accel={accel}, batches={batch_count}"]
     progress_bar = comfy.utils.ProgressBar(batch_count * 100)
+    batch_requests: list[dict] = []
     with tempfile.TemporaryDirectory(prefix="musefish_universr_") as temporary:
         scope = Path(temporary)
         for index in range(batch_count):
@@ -380,11 +462,23 @@ def _universr_execute_audio(
             output_path = scope / f"output_{index:04d}.wav"
             _universr_write_wav(input_path, current, source_rate)
             request = {"input_path": str(input_path), "output_path": str(output_path), "mode": batch_mode, "model": model, "channel_mode": effective_channel_mode, "input_sr": batch_rate, "ode_method": ode_method, "ode_steps": batch_steps, "guidance": batch_guidance, "chunk_sec": int(chunk_sec), "seed": int(seed), "deess": batch_deess, "accel": accel, "model_cache": cache_value, "demucs_executable": ""}
+            if batch_count > 1:
+                # Multi-clip batches keep one worker alive; outputs are read after
+                # it exits so the checkpoint is loaded once, not once per clip.
+                batch_requests.append(request)
+                result_batches.append(None)
+                continue
             produced = _universr_run_worker(request, scope, index, batch_count, logs, progress_bar)
             rendered, rendered_rate = _universr_read_wav(produced)
             if rendered_rate != 48000:
                 raise RuntimeError(f"UniverSR worker returned {rendered_rate} Hz; expected 48000 Hz")
             result_batches.append(rendered)
+        if batch_requests:
+            for index, produced in enumerate(_universr_run_worker_batch(batch_requests, scope, batch_count, logs, progress_bar)):
+                rendered, rendered_rate = _universr_read_wav(produced)
+                if rendered_rate != 48000:
+                    raise RuntimeError(f"UniverSR worker returned {rendered_rate} Hz; expected 48000 Hz")
+                result_batches[index] = rendered
     max_samples = max(int(item.shape[1]) for item in result_batches)
     output = torch.zeros((batch_count, max(int(item.shape[0]) for item in result_batches), max_samples), dtype=torch.float32)
     for index, item in enumerate(result_batches):
@@ -398,7 +492,7 @@ class _MusefishUniverSRAudioBase(io.ComfyNode):
 
     _MODEL = "general"
     _MODES: tuple[str, ...] = tuple(_UNIVERSR_MODES)
-    _NODE_ID = "MusefishUniverSRGeneralAudio"
+    _NODE_ID = "musefish_universr_general_audio"
     _DISPLAY_NAME = "Musefish UniverSR General Audio"
     _SEARCH_ALIASES = ["universr", "audio super resolution", "audio mastering", "demucs"]
     _EXPOSE_MODE = True
@@ -504,7 +598,7 @@ class MusefishUniverSRGeneralAudio(_MusefishUniverSRAudioBase):
 
     _MODEL = "general"
     _MODES = tuple(_UNIVERSR_MODES)
-    _NODE_ID = "MusefishUniverSRGeneralAudio"
+    _NODE_ID = "musefish_universr_general_audio"
     _DISPLAY_NAME = "Musefish UniverSR General Audio"
 
 
@@ -513,6 +607,6 @@ class MusefishUniverSRSpeechAudio(_MusefishUniverSRAudioBase):
 
     _MODEL = "speech"
     _MODES = ("sr",)
-    _NODE_ID = "MusefishUniverSRSpeechAudio"
+    _NODE_ID = "musefish_universr_speech_audio"
     _DISPLAY_NAME = "Musefish UniverSR Speech Audio"
     _EXPOSE_MODE = False

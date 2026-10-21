@@ -698,7 +698,7 @@
         115.26961328466716
       ],
       "properties": {
-        "Node name for S&R": "MusefishPiDBatchVideoUpscale",
+        "Node name for S&R": "musefish_pid_batch_video_upscale",
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ue_properties": {
           "input_ue_unconnectable": {},
@@ -711,7 +711,7 @@
         400,
         456
       ],
-      "type": "MusefishPiDBatchVideoUpscale",
+      "type": "musefish_pid_batch_video_upscale",
       "widgets_values": [
         24,
         "high quality, ultra detailed, sharp details",
@@ -1173,7 +1173,7 @@
         112.7190515847256
       ],
       "properties": {
-        "Node name for S&R": "AutoBatchAntiflicker",
+        "Node name for S&R": "musefish_autobatch_antiflicker",
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "ue_properties": {
           "input_ue_unconnectable": {},
@@ -1186,7 +1186,7 @@
         359.79702309412573,
         130
       ],
-      "type": "AutoBatchAntiflicker",
+      "type": "musefish_autobatch_antiflicker",
       "widgets_values": [
         15,
         20,
@@ -1291,7 +1291,7 @@
         336.21984621792586
       ],
       "properties": {
-        "Node name for S&R": "AutoBatchImageSharpenFS",
+        "Node name for S&R": "musefish_autobatch_image_sharpen_fs",
         "aux_id": "Brian98Z/ComfyUI-Musefish-Nodes",
         "cnr_id": "ComfyUI-Musefish-Nodes",
         "ue_properties": {
@@ -1305,7 +1305,7 @@
         361.58888561435674,
         202
       ],
-      "type": "AutoBatchImageSharpenFS",
+      "type": "musefish_autobatch_image_sharpen_fs",
       "widgets_values": [
         "hard",
         "gaussian",

@@ -85,9 +85,13 @@ class CFGVectorFieldODE(ODE):
         self.guidance_scale = guidance_scale
         
     def drift_coefficient(self, xt: torch.Tensor, t: torch.Tensor, y: torch.Tensor, **kwargs) -> torch.Tensor:
+        if self.guidance_scale == 1.0:
+            # (1-g)*unguided + g*guided with g == 1 is exactly the guided field;
+            # the unconditional network used to run and then be multiplied by 0.
+            return self.net(xt, t, y, **kwargs)
         guided_vector_field = self.net(xt, t, y, **kwargs)
         unguided_vector_field = self.net(xt, t, None, **kwargs)
-        
+
         return (1-self.guidance_scale) * unguided_vector_field + self.guidance_scale * guided_vector_field
 
 class EulerSolver(Solver):

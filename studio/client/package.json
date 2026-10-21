@@ -1,7 +1,7 @@
 {
   "name": "musefish-studio-client",
   "productName": "Musefish Studio",
-  "version": "1.0.0",
+  "version": "1.7.0",
   "private": true,
   "main": "main.js",
   "scripts": {

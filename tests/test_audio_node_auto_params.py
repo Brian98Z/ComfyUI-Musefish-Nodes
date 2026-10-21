@@ -70,7 +70,7 @@ class AutoParameterWiringTests(unittest.TestCase):
             mode="auto",
             model="general",
             allowed_modes=MUSEFISH._UNIVERSR_MODES,
-            node_name="MusefishUniverSRGeneralAudio",
+            node_name="musefish_universr_general_audio",
             input_sr="16000",
             channel_mode="stereo",
             ode_method="midpoint",
@@ -146,8 +146,8 @@ class AutoParameterWiringTests(unittest.TestCase):
         """Widget order and defaults are duplicated in the extension; drift there would hide the wrong
         widget or restore a stale value."""
         ext = self._extension()
-        for node_id, node in (("MusefishUniverSRGeneralAudio", MUSEFISH.MusefishUniverSRGeneralAudio),
-                              ("MusefishUniverSRSpeechAudio", MUSEFISH.MusefishUniverSRSpeechAudio)):
+        for node_id, node in (("musefish_universr_general_audio", MUSEFISH.MusefishUniverSRGeneralAudio),
+                              ("musefish_universr_speech_audio", MUSEFISH.MusefishUniverSRSpeechAudio)):
             with self.subTest(node=node_id):
                 schema_ids = [item.id for item in node.define_schema().inputs
                               if item.id not in {"audio", "model_cache"}]
@@ -166,7 +166,7 @@ class AutoParameterWiringTests(unittest.TestCase):
     def test_extension_governs_exactly_the_hidden_three(self) -> None:
         ext = self._extension()
         self.assertEqual(ext["GOVERNED_WIDGETS"], ["input_sr", "ode_steps", "guidance"])
-        self.assertEqual(ext["CURRENT_WIDGET_ORDER"]["MusefishUniverSRGeneralAudio"][:4],
+        self.assertEqual(ext["CURRENT_WIDGET_ORDER"]["musefish_universr_general_audio"][:4],
                          ["auto_params", *ext["GOVERNED_WIDGETS"]])
         self.assertIn('WEB_DIRECTORY = "./web"', (PLUGIN_ROOT / "__init__.py").read_text(encoding="utf-8"))
 

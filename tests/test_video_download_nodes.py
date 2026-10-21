@@ -185,9 +185,15 @@ def test_resolve_output_dir_prefers_desktop(tmp_path, monkeypatch):
 # ----------------------------------------------------------------- nodes
 
 
+DOWNLOAD_NODES = (
+    ("MusefishVideoDownload", "musefish_video_downloader"),
+    ("MusefishWeChatChannels", "musefish_wc_video_channels"),
+)
+
+
 def test_node_schemas_registered():
-    for node_id in ("MusefishVideoDownload", "MusefishWeChatChannels"):
-        node = getattr(node_mod, node_id)
+    for class_name, node_id in DOWNLOAD_NODES:
+        node = getattr(node_mod, class_name)
         schema = node.define_schema()
         assert schema.node_id == node_id
         input_ids = [i.id for i in schema.inputs]
@@ -196,8 +202,8 @@ def test_node_schemas_registered():
 
 def test_node_outputs_are_media_types():
     """Both download nodes expose VIDEO + fps only (no image tensors)."""
-    for node_id in ("MusefishVideoDownload", "MusefishWeChatChannels"):
-        schema = getattr(node_mod, node_id).define_schema()
+    for class_name, node_id in DOWNLOAD_NODES:
+        schema = getattr(node_mod, class_name).define_schema()
         outputs = schema.outputs
         assert len(outputs) == 2, f"{node_id} must have 2 outputs"
         ids = [o.id for o in outputs]
@@ -533,12 +539,12 @@ def test_auto_extract_prefers_video_over_thumb():
 # ------------------------------------------------------------ memory guard
 
 
-def test_memory_guard_returns_immediately_under_low_pressure():
+def test_memory_guard_returns_immediately_under_low_pressure(monkeypatch):
     guard = importlib.import_module(
         "custom_nodes.ComfyUI-Musefish-Nodes.memory_guard"
     )
-    # live system is nowhere near 95% in CI; must return False (no wait)
-    assert guard.system_memory_fraction() < 0.95
+    # Host pressure is not a test input: a busy workstation must not fail this.
+    monkeypatch.setattr(guard, "system_memory_fraction", lambda: 0.10)
     assert guard.wait_for_memory() is False
 
 
@@ -565,3 +571,96 @@ def test_memory_guard_deadline_forces_continue(monkeypatch):
     waited = guard.wait_for_memory(deadline_seconds=0.0, log=logs)
     assert waited is True
     assert any("continuing anyway" in line for line in logs)
+
+
+class _NullReporter:
+    """Progress reporter stub: the download tests never assert on progress."""
+
+    def fraction(self, value, label: str = "") -> None:
+        return None
+
+
+# ------------------------------------------------- yt-dlp upgrade-on-failure
+
+
+def test_extractor_failure_classification(monkeypatch):
+    """Only stale-extractor errors may trigger a pip upgrade."""
+    assert backend._looks_like_extractor_failure(Exception("Unable to extract nsig from player response"))
+    assert backend._looks_like_extractor_failure(Exception("Unsupported URL: https://example.com/x"))
+    assert backend._looks_like_extractor_failure(Exception("HTTP Error 403: Forbidden"))
+    # transport and proxy trouble must never launch pip
+    assert not backend._looks_like_extractor_failure(Exception("Read timed out"))
+    assert not backend._looks_like_extractor_failure(Exception("SSLError: UNEXPECTED_EOF_WHILE_READING"))
+    assert not backend._looks_like_extractor_failure(Exception("Unable to connect to proxy 127.0.0.1:7897"))
+    assert not backend._looks_like_extractor_failure(FileNotFoundError("ffmpeg"))
+
+
+def test_download_retries_after_ytdlp_upgrade(tmp_path, monkeypatch):
+    """A stale extractor upgrades yt-dlp once and retries instead of failing."""
+    attempts = {"n": 0}
+    upgrades = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download=True):
+            attempts["n"] += 1
+            if attempts["n"] == 1:
+                raise RuntimeError("Unable to extract yt initial data")
+            path = Path(self.opts["outtmpl"]).with_suffix(".mp4")
+            path.write_bytes(b"ok")
+            return {"requested_downloads": [{"filepath": str(path)}], "title": "t"}
+
+    fake_module = type("YtDlp", (), {"YoutubeDL": FakeYDL})
+    monkeypatch.setattr(backend, "_ytdlp_module", lambda: fake_module)
+    monkeypatch.setattr(backend, "_reload_ytdlp", lambda: None)
+    monkeypatch.setattr(backend, "_proxy_reachable", lambda proxy, timeout=2.0: False)
+
+    def fake_upgrade(log=None):
+        upgrades.append(True)
+        if log is not None:
+            log.append("站点解析失败，已自动升级 yt-dlp：old → new")
+        return True
+
+    monkeypatch.setattr(backend, "_auto_update_ytdlp", fake_upgrade)
+    logs: list[str] = []
+    path, info = backend.download_with_ytdlp(
+        "https://www.bilibili.com/video/BV1xx", tmp_path, reporter=_NullReporter(), log=logs
+    )
+    assert upgrades == [True]
+    assert attempts["n"] == 2
+    assert path.is_file() and info["title"] == "t"
+    assert any("自动升级" in line for line in logs)
+
+
+def test_download_does_not_upgrade_on_network_error(tmp_path, monkeypatch):
+    upgrades = []
+
+    class FakeYDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def extract_info(self, url, download=True):
+            raise RuntimeError("Read timed out")
+
+    monkeypatch.setattr(backend, "_ytdlp_module",
+                        lambda: type("YtDlp", (), {"YoutubeDL": FakeYDL}))
+    monkeypatch.setattr(backend, "_proxy_reachable", lambda proxy, timeout=2.0: False)
+    monkeypatch.setattr(backend, "_auto_update_ytdlp", lambda log=None: upgrades.append(True) or True)
+    with pytest.raises(RuntimeError):
+        backend.download_with_ytdlp("https://www.bilibili.com/video/BV1xx", tmp_path,
+                                    reporter=_NullReporter())
+    assert upgrades == []

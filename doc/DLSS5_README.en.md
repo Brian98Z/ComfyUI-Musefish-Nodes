@@ -6,7 +6,7 @@
 
 ## What this is
 
-This wraps DLSS5Tool's NGX Feature 18 as two ComfyUI nodes: `MusefishDLSS5NeuralRender` processes single images and short-video IMAGE frame batches (fixed to one worker), while `MusefishDLSS5VideoStream` accepts VIDEO, processes it frame by frame, and returns VIDEO for high-resolution and long-form video. Both are in `Musefish/Video`.
+This wraps DLSS5Tool's NGX Feature 18 as two ComfyUI nodes: `musefish_dlss5_neural_render` processes single images and short-video IMAGE frame batches (fixed to one worker), while `musefish_dlss5_video_stream` accepts VIDEO, processes it frame by frame, and returns VIDEO for high-resolution and long-form video. Both are in `Musefish/Video`.
 
 ## Files
 
@@ -105,11 +105,11 @@ Incremental optimization on 2026-09-24: RGB float32→RGBA8 input conversion now
 4. `keep_session=auto` caches only session pools with an exactly matching contract; the old pool is closed when parameters change. When the task queue no longer contains DLSS5 work, a background check closes the worker after it has been idle for 2 seconds. The warm pool stays alive across VHS Meta Batch continuation, avoiding a cold start for every batch.
 5. Frames are transferred through shared memory. On the worker side, the two ring buffers are registered as pinned memory with `cudaHostRegister`, allowing the NGX host's D3D12 per-frame DMA uploads/downloads to skip pageable staging copies (1080p off-mode steady state measured 23.0ms → 21.1ms/frame, about +8%; if the CUDA runtime cannot be found, it automatically falls back to ordinary mode with no functional impact). When the GPU is dedicated to this work, measured performance is about 21ms/frame at 1080p off and about 70ms/frame for 2× upscaling to 4K. Performance slows in proportion to GPU contention from other tasks. Attention/PyTorch acceleration does not apply to this engine (NGX is closed-source D3D12 inference).
 6. The node processes frames as a stream internally (per-frame RGBA conversion with OpenCV/NumPy, written directly to the output tensor, with no full-batch intermediate copy); its own peak memory use is approximately the upstream input batch plus the output batch. Upstream `VHS_LoadVideo` loads the entire video into memory if `frame_load_cap` is not set. For long videos, use `frame_load_cap`/`skip_first_frames` to divide the input into chunks.
-7. The IMAGE node is fixed to one worker; use `MusefishDLSS5VideoStream` for long videos. Parallel-performance figures from before the change are historical comparisons only; remove the old control when resaving old workflows.
+7. The IMAGE node is fixed to one worker; use `musefish_dlss5_video_stream` for long videos. Parallel-performance figures from before the change are historical comparisons only; remove the old control when resaving old workflows.
 
 ## High-resolution long videos: single-run streaming node
 
-Connect on the canvas: `LoadVideo (VIDEO) → MusefishDLSS5VideoStream (VIDEO) → SaveVideo`. The middle node accepts file-backed VIDEO (LoadVideo returns a reference to a file), processes frames one at a time, writes an intermediate MP4 under ComfyUI's temp directory, and passes the file-backed VIDEO to SaveVideo for output. A run keeps only one NGX session, two RGBA8 shared-memory slots, and a single-frame decode/encode buffer; it does not create a 900-frame IMAGE batch or require manual stitching. Temporal history remains continuous from the first to the last frame. The intermediate filename is fixed as `Musefish/DLSS5_stream_<random-value>.mp4`; there is no prefix control. Set the final video name only in SaveVideo's `filename_prefix`.
+Connect on the canvas: `LoadVideo (VIDEO) → musefish_dlss5_video_stream (VIDEO) → SaveVideo`. The middle node accepts file-backed VIDEO (LoadVideo returns a reference to a file), processes frames one at a time, writes an intermediate MP4 under ComfyUI's temp directory, and passes the file-backed VIDEO to SaveVideo for output. A run keeps only one NGX session, two RGBA8 shared-memory slots, and a single-frame decode/encode buffer; it does not create a 900-frame IMAGE batch or require manual stitching. Temporal history remains continuous from the first to the last frame. The intermediate filename is fixed as `Musefish/DLSS5_stream_<random-value>.mp4`; there is no prefix control. Set the final video name only in SaveVideo's `filename_prefix`.
 
 The original audio is converted to AAC. If both width and height are at most 4096, H.264 is used; CPU mode defaults to CRF 19 (adjustable). On failure or interruption, an incomplete `.part.mp4` is removed and the child process and worker are closed.
 
@@ -152,7 +152,7 @@ The IMAGE node can be connected to LoadImage or short-video frame batches; conne
 
 ## Verification record (2026-09-20)
 
-- An API run on the 8988 instance completed the full LoadImage → MusefishDLSS5NeuralRender → SaveImage path successfully, producing `output/dlss5_test_00001_.png`.
+- An API run on the 8988 instance completed the full LoadImage → musefish_dlss5_neural_render → SaveImage path successfully, producing `output/dlss5_test_00001_.png`.
 - Pixel-by-pixel comparison with the original: 54.4% of pixels changed by >8/255; mean absolute difference 8.18. The visible detail enhancement matched expectations for Feature 18.
 - The complete 2× RTX VSR + Feature 18 path succeeded, producing 1728×2304 (`output/dlss5_sr2x_00001_.png`); all four VSR quality presets passed real-machine tests.
 - Retest after replacing PNG with shared-memory IPC: off/2x both succeeded on the 8988 instance (`shm_off_00001_.png` / `shm_2x_00001_.png`) with correct dimensions (864×1152 / 1728×2304). With the GPU dedicated, off at 1080p was about 18.5ms/frame; 2× to 4K was about 70ms/frame.

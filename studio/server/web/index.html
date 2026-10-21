@@ -191,6 +191,9 @@ textarea{resize:vertical;min-height:60px}
 }
 .job .files a:hover{border-color:var(--accent);color:#fff}
 .job .files a .sz{color:var(--faint);font-size:11px}
+.job .files .file-plain{display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;max-width:100%}
+.job .files .file-plain .sz{color:var(--faint);font-size:11px}
+.job .files .file-plain .meta{word-break:break-all}
 .job img.thumb{max-width:100%;max-height:190px;margin-top:9px;border-radius:8px;border:1px solid var(--border);display:block;cursor:zoom-in}
 .job img.thumb:active{max-height:none;width:100%}
 .job video.thumb{max-width:100%;max-height:220px;margin-top:9px;border-radius:8px;border:1px solid var(--border);display:block}
@@ -413,6 +416,7 @@ const FEATURES = {
   universr:    { group:"audio", label:"UniverSR 音频超分", accept:"audio/*", fileLabel:"音频" },
   video_download: { group:"misc", label:"视频下载", accept:null, urlBased:true },
   wechat_download: { group:"misc", label:"微信视频号下载", accept:null, urlBased:true },
+  file_download: { group:"misc", label:"文件断点续传", accept:null, urlBased:true },
 };
 
 const SCHEMAS = {
@@ -507,6 +511,14 @@ const SCHEMAS = {
     fields: [
       ["url","分享链接 / 分享文本 / API JSON（可选）","textarea",10,"wide"],
     ]},
+  file_download: {
+    fields: [
+      ["url","下载链接（直链 / 签名 CDN，含完整查询串）","textarea",6,"wide"],
+      ["save_dir","保存目录（默认电脑桌面）","dir","","wide"],
+      ["filename","另存文件名（留空自动识别）","line","","wide"],
+      ["conns","并发连接数",32],
+      ["proxy","代理","proxy","auto","wide"],
+    ]},
 };
 
 const GROUPS = {
@@ -515,6 +527,42 @@ const GROUPS = {
   audio: "音频处理",
   misc:  "其他工具",
 };
+
+// 参数枚举的中文显示名：value 仍是后端/ComfyUI 的原始值，只翻译下拉里看到的文字
+const OPTION_ZH = {
+  "off":"关闭", "auto":"自动", "default":"默认", "none":"无",
+  // 输出倍率（DLSS5）
+  "1× (Native)":"原生", "1.5× (Quality)":"画质", "2× (Balance)":"均衡",
+  "3× (Performance)":"性能", "4× (Ultra)":"极致",
+  // 画质档 / 风格 / 会话
+  "performance":"性能", "balanced":"均衡", "quality":"画质", "ultra":"极致",
+  "natural":"自然", "cinema":"电影",
+  // PiD 通用
+  "flux":"Flux", "sd3":"SD3", "sdxl":"SDXL", "qwenimage":"Qwen-Image",
+  "gpu":"GPU", "cpu":"CPU",
+  // 技术后端名保留原文，后面标注特性（不是翻译）
+  "Kitchen":"最快", "cuDNN":"标准", "cuDNN TF32":"最快",
+  "hard":"硬阈值", "linear":"线性", "median":"中值", "gaussian":"高斯",
+  // UniverSR
+  "general":"通用", "speech":"语音", "sr":"超分", "master":"母带",
+  "sr_master":"超分 + 母带", "stem_mix":"分轨混合",
+  "8000":"8 kHz", "12000":"12 kHz", "16000":"16 kHz", "24000":"24 kHz",
+  "mono":"单声道", "stereo":"立体声", "fp32":"最精确", "bf16":"省显存",
+  "euler":"欧拉", "midpoint":"中点", "rk4":"RK4",
+  // 视频下载
+  "best":"最佳画质", "1080p":"1080P", "720p":"720P", "480p":"480P",
+  "YouTube":"油管", "Bilibili":"哔哩哔哩", "Douyin":"抖音",
+  "Xiaohongshu":"小红书", "X / Twitter":"推特",
+  // 采样器 / 调度器
+  "euler_ancestral":"欧拉 祖先采样", "dpm_2_ancestral":"DPM2 祖先采样",
+  "dpmpp_2s_ancestral":"DPM++ 2S 祖先采样", "dpmpp_2m":"DPM++ 2M",
+  "dpmpp_2m_sde":"DPM++ 2M SDE", "dpmpp_3m_sde":"DPM++ 3M SDE",
+  "dpmpp_sde":"DPM++ SDE", "lcm":"少步",
+  "normal":"常规", "exponential":"指数",
+  "sgm_uniform":"SGM 均匀", "simple":"简单", "ddim_uniform":"DDIM 均匀",
+  "linear_quadratic":"线性二次", "kl_optimal":"KL 最优",
+};
+function optLabel(v){ const zh = OPTION_ZH[v]; return zh && zh !== v ? `${v}（${zh}）` : v; }
 
 const $ = s => document.querySelector(s);
 const el = (t,a={},...c)=>{const n=document.createElement(t);for(const[k,v]of Object.entries(a)){if(k==="class")n.className=v;else if(k.startsWith("on"))n.addEventListener(k.slice(2),v);else n.setAttribute(k,v)}c.forEach(x=>n.append(x));return n};
@@ -581,6 +629,21 @@ function renderParams(){
       wrap.append(el("label",{},label),sel);
       box.append(wrap);
       fillSamplers(sel,kind,def);
+    } else if(kind==="dir"){
+      const inp = el("input",{type:"text","data-name":name,"data-text":"1",value:def||""});
+      wrap.append(el("label",{},label),inp);
+      box.append(wrap);
+      fillDirDefault(inp);
+    } else if(kind==="proxy"){
+      const sel = el("select",{"data-name":name},
+        el("option",{value:"auto"},"auto（自动）"),el("option",{value:"direct"},"direct（直连）"));
+      wrap.append(el("label",{},label),sel);
+      box.append(wrap);
+      fillProxyOptions(sel);
+    } else if(kind==="line"){
+      wrap.append(el("label",{},label),
+        el("input",{type:"text","data-name":name,"data-text":"1",value:def||"",placeholder:typeof def==="string"?def:""}));
+      box.append(wrap);
     } else if(kind==="text"){
       wrap.append(el("label",{},label),el("textarea",{"data-name":name,"data-text":"1"},def||""));
       box.append(wrap);
@@ -590,7 +653,7 @@ function renderParams(){
       box.append(wrap);
     } else if(Array.isArray(kind)){
       const sel = el("select",{"data-name":name});
-      kind.forEach(o=>sel.append(el("option",{value:o},o)));
+      kind.forEach(o=>sel.append(el("option",{value:o},optLabel(o))));
       sel.value = def ?? kind[0];
       wrap.append(el("label",{},label),sel);
       box.append(wrap);
@@ -609,6 +672,31 @@ function renderParams(){
   });
 }
 
+// 文件断点续传：默认保存目录（电脑桌面）与本机已运行的代理客户端
+let dlOptions = null;
+function getDownloadOptions(){
+  return dlOptions || (dlOptions = fetch("/api/download/options")
+    .then(r => r.json())
+    .catch(() => ({})));
+}
+async function fillDirDefault(inp){
+  const o = await getDownloadOptions();
+  if(!inp.value && o.save_dir) inp.value = o.save_dir;
+}
+async function fillProxyOptions(sel){
+  const o = await getDownloadOptions();
+  const auto = sel.querySelector('option[value="auto"]');
+  const have = new Set([...sel.options].map(x => x.value));
+  (o.proxies || []).forEach(p => {
+    if(have.has(p.url)) return;
+    have.add(p.url);
+    sel.append(el("option",{value:p.url},p.label));
+  });
+  if(o.auto?.url && !have.has(o.auto.url)){
+    sel.append(el("option",{value:o.auto.url},`${o.auto.label}（当前自动）`));
+  }
+}
+
 async function fillModels(sel, kind, cur){
   try{
     const r = await fetch(`/api/models?kind=${kind}`); const d = await r.json();
@@ -621,13 +709,16 @@ async function fillModels(sel, kind, cur){
 }
 async function fillSamplers(sel, kind, cur){
   try{
-    const d = await (await fetch("/api/nodes/MusefishPiDBatchVideoUpscale")).json();
-    const info = d.MusefishPiDBatchVideoUpscale?.input;
-    const list = info?.required?.[kind==="sampler"?"sampler_name":"scheduler"]?.[0];
-    if(!list) return;
+    const d = await (await fetch("/api/nodes/musefish_pid_batch_video_upscale")).json();
+    const info = d.musefish_pid_batch_video_upscale?.input;
+    const spec = info?.required?.[kind==="sampler"?"sampler_name":"scheduler"];
+    // ComfyUI 两种 schema 形态：旧 ["euler",...] / 新 ["COMBO",{options:[...]}]
+    const list = Array.isArray(spec?.[0]) ? spec[0]
+               : (Array.isArray(spec?.[1]?.options) ? spec[1].options : null);
+    if(!list?.length) return;
     sel.innerHTML = "";
-    list.forEach(o=>sel.append(el("option",{value:o},o)));
-    sel.value = list.includes(cur)?cur:list[0];
+    list.forEach(o=>sel.append(el("option",{value:o},optLabel(o))));
+    sel.value = list.includes(cur) ? cur : (list.includes(spec?.[1]?.default) ? spec[1].default : list[0]);
   }catch(e){}
 }
 
@@ -642,7 +733,7 @@ async function pick(file){
   $("#drop-text").textContent = "上传中…";
   const fd = new FormData(); fd.append("file",file);
   try{
-    const r = await fetch("/api/upload",{method:"POST",body:fd});
+    const r = await fetch("/api/upload",{method:"POST",headers:{"X-Musefish-Client":"1"},body:fd});
     inputFile = await r.json();
     updateDrop();
   }catch(e){ $("#drop-text").textContent = "上传失败："+e; }
@@ -667,10 +758,10 @@ $("#btn-run").addEventListener("click",async()=>{
   const urlBased = !!FEATURES[task]?.urlBased;
   const body = urlBased ? {task,params} : {task,input_path:inputFile.path,params};
   if(!urlBased && !inputFile){ drop.style.borderColor="var(--err)"; setTimeout(()=>drop.style.borderColor="",900); return; }
-  if(urlBased && !params.url && task!=="wechat_download"){ alert("请填写视频链接"); return; }
+  if(urlBased && !params.url && task!=="wechat_download"){ alert(task==="file_download"?"请填写下载链接":"请填写视频链接"); return; }
   const btn = $("#btn-run"); btn.disabled = true;
   try{
-    const r = await fetch("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json"},
+    const r = await fetch("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json","X-Musefish-Client":"1"},
       body:JSON.stringify(body)});
     const d = await r.json();
     if(d.error) alert(d.error);
@@ -687,24 +778,37 @@ function renderJobCard(j){
   card.dataset.jid = j.id;
   const badge = el("span",{class:"badge "+j.status},j.status);
   const dur = (j.started&&j.finished)?`${Math.max(1,Math.round(j.finished-j.started))}s`:"";
-  const taskSpan = el("span",{class:"task"},j.task);
+  const taskSpan = el("span",{class:"task"},FEATURES[j.task]?.label || j.task);
   if(dur) taskSpan.append(el("span",{class:"dur"},dur));
   card.append(el("div",{class:"top"},taskSpan,badge));
   const queueTxt = (j.progress && Number.isFinite(j.progress.queue_remaining)) ? ` · 队列剩余 ${j.progress.queue_remaining}` : "";
   card.append(el("div",{class:"meta"},new Date(j.created*1000).toLocaleString()+queueTxt));
   if(j.error) card.append(el("div",{class:"err"},j.error));
   if(j.status==="running" && j.progress?.pct != null){
+    const spd = j.progress.speed != null ? ` · ${j.progress.speed} MB/s` : "";
+    const size = j.progress.text ? ` · ${j.progress.text.split(" · ")[0]}` : "";
+    const eta = j.progress.eta != null ? ` · 剩余 ${Math.max(1, Math.round(j.progress.eta))}s` : "";
     const bar = el("div",{class:"pct"},el("i",{style:`width:${j.progress.pct}%`}));
     card.append(bar);
-    card.append(el("div",{class:"meta"},`下载中 ${j.progress.pct}%`));
+    card.append(el("div",{class:"meta"},`下载中 ${j.progress.pct}%${size}${spd}${eta}`));
   }
   if(j.result?.outputs?.length){
     const files = el("div",{class:"files"});
     j.result.outputs.forEach(f=>{
-      const a = el("a",{href:f.url,target:"_blank",download:f.name});
-      a.append(el("span",{},"⬇ "+f.name.split("/").pop()));
-      if(f.bytes) a.append(el("span",{class:"sz"},fmtBytes(f.bytes)));
-      files.append(a);
+      const label = f.name.split("/").pop();
+      if(f.url){
+        const a = el("a",{href:f.url,target:"_blank",download:f.name});
+        a.append(el("span",{},"⬇ "+label));
+        if(f.bytes) a.append(el("span",{class:"sz"},fmtBytes(f.bytes)));
+        files.append(a);
+      } else {
+        // saved outside the output dir (e.g. straight into a ComfyUI models
+        // folder): no /files URL, so show the absolute path instead
+        const row = el("div",{class:"file-plain",title:f.path||""});
+        row.append(el("span",{},"⬇ "+label+(f.bytes?` · ${fmtBytes(f.bytes)}`:"")));
+        if(f.path) row.append(el("div",{class:"meta"},f.path));
+        files.append(row);
+      }
     });
     card.append(files);
     const img = j.result.outputs.find(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name));
@@ -752,7 +856,7 @@ async function pollJobs(){
 // download all outputs of visible jobs
 $("#btn-dl-all").addEventListener("click",()=>{
   const urls = [];
-  lastJobs.forEach(j=>(j.result?.outputs||[]).forEach(f=>urls.push({url:f.url,name:f.name.split("/").pop()})));
+  lastJobs.forEach(j=>(j.result?.outputs||[]).forEach(f=>{ if(f.url) urls.push({url:f.url,name:f.name.split("/").pop()}); }));
   if(!urls.length){ alert("当前没有可下载的产物"); return; }
   urls.forEach((u,i)=>setTimeout(()=>{
     const a = document.createElement("a");
@@ -764,7 +868,7 @@ $("#btn-dl-all").addEventListener("click",()=>{
 $("#btn-clean").addEventListener("click",async()=>{
   if(!confirm("删除全部任务及其产物文件？（运行中的任务保留）")) return;
   try{
-    const r = await fetch("/api/outputs",{method:"DELETE"});
+    const r = await fetch("/api/outputs",{method:"DELETE",headers:{"X-Musefish-Client":"1"}});
     const d = await r.json();
     if(d.error) alert(d.error); else pollJobs();
   }catch(e){ alert("清理失败："+e); }
@@ -798,8 +902,8 @@ async function pollStatus(){
     st.innerHTML = `<span class="dot"></span>${d.comfy.running?"引擎运行中 :"+d.comfy.port:"引擎未运行"}`;
   }catch(e){}
 }
-$("#btn-start").addEventListener("click",async()=>{await fetch("/api/comfy/start",{method:"POST"});setTimeout(pollStatus,1500)});
-$("#btn-stop").addEventListener("click",async()=>{await fetch("/api/comfy/stop",{method:"POST"});setTimeout(pollStatus,1500)});
+$("#btn-start").addEventListener("click",async()=>{await fetch("/api/comfy/start",{method:"POST",headers:{"X-Musefish-Client":"1"}});setTimeout(pollStatus,1500)});
+$("#btn-stop").addEventListener("click",async()=>{await fetch("/api/comfy/stop",{method:"POST",headers:{"X-Musefish-Client":"1"}});setTimeout(pollStatus,1500)});
 
 // ---- view switching: 设置/关于 = 右侧抽屉
 function openDrawer(id, maskId){
@@ -835,7 +939,7 @@ $("#btn-env-setup").addEventListener("click",async()=>{
   const st = $("#env-setup-state");
   st.textContent = "启动中…（pip 约 15-20 GB，首次需较长时间）";
   try{
-    const r = await fetch("/api/env/setup",{method:"POST"});
+    const r = await fetch("/api/env/setup",{method:"POST",headers:{"X-Musefish-Client":"1"}});
     const d = await r.json();
     if(d.error){ st.textContent = "失败："+d.error; return; }
     const timer = setInterval(async()=>{
@@ -857,7 +961,7 @@ $("#btn-models-download").addEventListener("click",async()=>{
   st.textContent = "下载中…";
   try{
     const r = await fetch("/api/models/download",{method:"POST",
-      headers:{"Content-Type":"application/json"}, body:JSON.stringify({only:"all"})});
+      headers:{"Content-Type":"application/json","X-Musefish-Client":"1"}, body:JSON.stringify({only:"all"})});
     const d = await r.json();
     out.textContent = d.output || "(无输出)";
     st.textContent = d.ok ? "完成 ✅" : "存在失败项，详见输出";
@@ -938,7 +1042,7 @@ document.getElementById("btn-ep-connect").addEventListener("click",async()=>{
   const host = $("#ep-host").value.trim() || "127.0.0.1";
   const port = Number($("#ep-port").value);
   const d = await (await fetch("/api/comfy/endpoint",{method:"POST",
-    headers:{"Content-Type":"application/json"},body:JSON.stringify({host,port})})).json();
+    headers:{"Content-Type":"application/json","X-Musefish-Client":"1"},body:JSON.stringify({host,port})})).json();
   if(d.error){ alert(d.error); return; }
   markEp(d.running, d.port);
   pollStatus();
@@ -957,7 +1061,7 @@ document.getElementById("btn-ep-scan").addEventListener("click",async()=>{
       b.addEventListener("click",async()=>{
         $("#ep-host").value = f.host; $("#ep-port").value = f.port;
         const r = await (await fetch("/api/comfy/endpoint",{method:"POST",
-          headers:{"Content-Type":"application/json"},body:JSON.stringify({host:f.host,port:f.port})})).json();
+          headers:{"Content-Type":"application/json","X-Musefish-Client":"1"},body:JSON.stringify({host:f.host,port:f.port})})).json();
         markEp(r.running, r.port);
         pollStatus();
       });
@@ -969,7 +1073,7 @@ document.getElementById("btn-ep-scan").addEventListener("click",async()=>{
 document.getElementById("btn-relink").addEventListener("click",async()=>{
   if(!confirm("将 data/models 下的模型叶子目录重新链接到本机 ComfyUI 安装（开发机模式）？\n若目录内已是真实文件会被删除并替换为链接。")) return;
   try{
-    const r = await fetch("/api/models/relink",{method:"POST"});
+    const r = await fetch("/api/models/relink",{method:"POST",headers:{"X-Musefish-Client":"1"}});
     const d = await r.json();
     alert(d.error ? "失败："+d.error : "已重建链接");
     loadSettings();

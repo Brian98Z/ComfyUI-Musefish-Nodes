@@ -1,11 +1,11 @@
 # Video Download Nodes
 
-This guide documents the `MusefishVideoDownload` and `MusefishWeChatChannels` nodes in ComfyUI-Musefish-Nodes. A ready-to-run workflow is available at [`workflows/Musefish_Video_Downloader.json`](../workflows/Musefish_Video_Downloader.json).
+This guide documents the `musefish_video_downloader` and `musefish_wc_video_channels` nodes in ComfyUI-Musefish-Nodes. A ready-to-run workflow is available at [`workflows/Musefish_Video_Downloader.json`](../workflows/Musefish_Video_Downloader.json).
 
 ## Features and quick start
 
-- **`Musefish Video Download`** (node ID: `MusefishVideoDownload`) downloads videos from supported platforms. YouTube, Bilibili, and X/Twitter use the in-process yt-dlp integration. Douyin uses the built-in `iesdouyin` share-page parser; yt-dlp's Douyin extractor is blocked by the platform's `a_bogus` signature checks and is not usable. Xiaohongshu is attempted through yt-dlp; if that fails, the node reports an error and recommends extracting the video through a browser. Before returning a file, the node verifies both the MP4 `ftyp` header and the file with ffprobe.
-- **`Musefish WC Video Channels`** (node ID: `MusefishWeChatChannels`) downloads and decrypts WeChat Channels videos in one automatic, linear flow; you do not need to enter a key manually:
+- **`Musefish Video Download`** (node ID: `musefish_video_downloader`) downloads videos from supported platforms. YouTube, Bilibili, and X/Twitter use the in-process yt-dlp integration. Douyin uses the built-in `iesdouyin` share-page parser; yt-dlp's Douyin extractor is blocked by the platform's `a_bogus` signature checks and is not usable. Xiaohongshu is attempted through yt-dlp; if that fails, the node reports an error and recommends extracting the video through a browser. Before returning a file, the node verifies both the MP4 `ftyp` header and the file with ffprobe.
+- **`Musefish WC Video Channels`** (node ID: `musefish_wc_video_channels`) downloads and decrypts WeChat Channels videos in one automatic, linear flow; you do not need to enter a key manually:
   **Parse pasted input automatically → scan the client process memory for URL/decode_key → download encrypted video → check `ftyp` header → decrypt → validate with ffprobe.**
   The operation stops immediately if validation fails. With a wrong key, it will not download the entire file or emit an unvalidated file.
 

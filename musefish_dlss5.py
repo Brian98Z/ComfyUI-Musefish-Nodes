@@ -153,7 +153,7 @@ class _SessionCache:
             # A current execution may still be encoding; VHS Meta Batch
             # requeues subsequent chunks before the current one completes.
             has_dlss_work = any(
-                any(node.get("class_type") == "MusefishDLSS5NeuralRender"
+                any(node.get("class_type") == "musefish_dlss5_neural_render"
                     for node in item[2].values())
                 for item in (*running, *pending)
             )
@@ -185,7 +185,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
     def define_schema(cls) -> io.Schema:
         available, _detail = backend_available()
         return io.Schema(
-            node_id="MusefishDLSS5NeuralRender",
+            node_id="musefish_dlss5_neural_render",
             display_name="Musefish DLSS5 Neural Render",
             search_aliases=["dlss5", "dlss", "neural render", "神经渲染", "DLSS5Tool"],
             category="Musefish/Video",
@@ -279,7 +279,9 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
         pool_size = 1
         # The output tensor is the node's unavoidable return value; everything
         # else stays per-frame so peak RAM ~= upstream input + output.
-        out_tensor = torch.empty((frame_count, out_h, out_w, 3), dtype=torch.float32)
+        # Alpha needs no post-pass: allocate the fourth channel up front and fill it
+        # where it is produced, instead of concatenating a second full-size batch.
+        out_tensor = torch.empty((frame_count, out_h, out_w, 4 if has_alpha else 3), dtype=torch.float32)
         sessions: list[DLSS5Session] | None = None
         counts = [0] * pool_size
         one = np.float32(1.0)
@@ -334,7 +336,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
                 interpolation = (cv2.INTER_AREA if render_rgb.shape[0] > out_h or render_rgb.shape[1] > out_w
                                  else cv2.INTER_CUBIC)
                 cv2.resize(render_rgb, (out_w, out_h), dst=output_rgb, interpolation=interpolation)
-            np.divide(output_rgb, scale, out=out_tensor[index].numpy(), dtype=np.float32)
+            np.divide(output_rgb, scale, out=out_tensor[index, :, :, :3].numpy(), dtype=np.float32)
             counts[slot] += 1
             cls._check_cancel()
             progress.update_absolute(min(sum(counts), frame_count - 1))
@@ -426,7 +428,7 @@ class MusefishDLSS5NeuralRender(io.ComfyNode):
                 alpha_f32 = torch.nn.functional.interpolate(
                     alpha_f32.unsqueeze(1), size=(out_h, out_w), mode="area"
                 ).squeeze(1)
-            out_tensor = torch.cat([out_tensor, alpha_f32.unsqueeze(-1)], dim=-1)
+            out_tensor[:, :, :, 3] = alpha_f32
         progress.update_absolute(frame_count)
         return io.NodeOutput(out_tensor)
 

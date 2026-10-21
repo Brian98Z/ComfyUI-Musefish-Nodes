@@ -273,9 +273,12 @@ def _pit_chunked_forward(
         shift_mlp, scale_mlp, gate_mlp = mlp_params.chunk(3, dim=-1)
         gate_mlp = gate_mlp.contiguous()
         mlp_input = apply_adaln_(self.norm2(x[start:end]), shift_mlp, scale_mlp)
+        # Modulation storage is dead once the MLP input exists; holding it through
+        # the MLP stacks ~24 MiB of gates/shift/scale on the MLP peak.
+        del shift_mlp, scale_mlp
         mlp_out = self.mlp(mlp_input)
         x[start:end].addcmul_(gate_mlp, mlp_out)
-        del mlp_params, shift_mlp, scale_mlp, gate_mlp, mlp_input, mlp_out
+        del mlp_params, gate_mlp, mlp_input, mlp_out
         comfy.model_management.throw_exception_if_processing_interrupted()
     return x
 

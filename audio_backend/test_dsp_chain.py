@@ -130,7 +130,7 @@ class MasterChainTests(unittest.TestCase):
         low_only = sosfiltfilt(butter(8, 8000, btype="low", fs=SAMPLE_RATE, output="sos"), low_only)
         low_only = np.stack([low_only, low_only], axis=1)
         before = dsp._band_energy_db(low_only, SAMPLE_RATE, 12000, 16000)
-        shaped = dsp.hf_shape(low_only, SAMPLE_RATE, drop1216_target=27.0, d812_now=12.0)
+        shaped = dsp.hf_shape(low_only, SAMPLE_RATE, drop1216_target=27.0)
         after = dsp._band_energy_db(shaped, SAMPLE_RATE, 12000, 16000)
         self.assertLessEqual(after - before, 0.5)
 

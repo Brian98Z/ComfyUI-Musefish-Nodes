@@ -11,12 +11,14 @@ import json
 import os
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import threading
 import time
 import urllib.request as _ur
 import uuid
+from urllib.parse import quote, unquote
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -178,6 +180,12 @@ supervisor = ComfySupervisor()
 
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
+# History survives a restart: the UI is the only record of what was produced,
+# and a reboot used to erase it. Only terminal records are written (a crash
+# mid-download is recovered from the plugin's own .part/.state files).
+JOBS_FILE = DATA_DIR / "jobs.json"
+JOBS_MAX = max(10, int(CONFIG.get("jobs_max", 200)))
+_PERSIST = {"dirty": threading.Event(), "stop": threading.Event()}
 _env_setup_proc: dict = {}  # {"proc","tail","done"} — one-shot env setup bookkeeping
 WORK_Q: "queue.Queue[str]" = __import__("queue").Queue()
 TASK_BUILDERS = {
@@ -188,7 +196,7 @@ TASK_BUILDERS = {
     "universr": workflows.universr_graph,
 }
 # Tasks that bypass ComfyUI entirely (plugin python backends run in-process).
-DIRECT_TASKS = {"video_download", "wechat_download"}
+DIRECT_TASKS = {"video_download", "wechat_download", "file_download"}
 
 
 def _new_job(task: str, params: dict) -> dict:
@@ -206,8 +214,124 @@ def _new_job(task: str, params: dict) -> dict:
     }
     with JOBS_LOCK:
         JOBS[job["id"]] = job
+    _mark_dirty()
     WORK_Q.put(job["id"])
     return job
+
+_TERMINAL = ("done", "error", "cancelled")
+_JOB_FIELDS = ("id", "task", "status", "error", "created", "started", "finished",
+               "progress", "result")
+
+
+def _job_record(job: dict) -> dict:
+    """The persisted shape is exactly what /api/jobs returns."""
+    return {key: job.get(key) for key in _JOB_FIELDS}
+
+_JOB_ID_RE = re.compile(r"^[0-9a-f]{12}$")
+
+
+def _sanitise_result(result) -> dict:
+    """Restored results are user-writable bytes: keep only local /files links."""
+    if not isinstance(result, dict):
+        return {}
+    outputs = []
+    for item in result.get("outputs") or []:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "")
+        outputs.append({**item, "url": url if url.startswith("/files/") else ""})
+    return {**result, "outputs": outputs}
+
+
+def _contained_output(relative: str) -> Path | None:
+    """Resolve a /files/ path inside OUTPUT_DIR, or None (no prefix tricks)."""
+    try:
+        dest = (OUTPUT_DIR / relative).resolve()
+        dest.relative_to(OUTPUT_DIR.resolve())
+    except (ValueError, OSError):
+        return None
+    return dest
+
+
+def _mark_dirty() -> None:
+    """Ask the writer thread to persist; callers never touch the disk."""
+    _PERSIST["dirty"].set()
+
+
+def _prune_jobs() -> list[str]:
+    """Drop the oldest *terminal* records beyond JOBS_MAX (files stay on disk)."""
+    with JOBS_LOCK:
+        terminal = sorted((j for j in JOBS.values() if j.get("status") in _TERMINAL),
+                          key=lambda j: j.get("created") or 0)
+        excess = len(JOBS) - JOBS_MAX
+        dropped = []
+        for job in terminal:
+            if excess <= 0:
+                break
+            if JOBS.pop(job["id"], None) is not None:
+                dropped.append(job["id"])
+                excess -= 1
+    return dropped
+
+
+_WRITE_LOCK = threading.Lock()   # serialises the file itself, not just the payload
+
+
+def _write_jobs() -> None:
+    with _WRITE_LOCK:
+        _write_jobs_locked()
+
+
+def _write_jobs_locked() -> None:
+    with JOBS_LOCK:
+        payload = {"version": 1, "jobs": [_job_record(j) for j in
+                                          sorted(JOBS.values(), key=lambda j: j.get("created") or 0)]}
+    JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temporary = JOBS_FILE.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    os.replace(temporary, JOBS_FILE)
+
+
+def _load_jobs() -> int:
+    """Restore history; anything that was mid-flight is reported as interrupted."""
+    if not JOBS_FILE.is_file():
+        return 0
+    try:
+        payload = json.loads(JOBS_FILE.read_text("utf-8"))
+        records = payload.get("jobs") or []
+    except (OSError, ValueError) as exc:
+        log(f"jobs history unreadable ({exc}); starting empty")
+        return 0
+    restored = 0
+    with JOBS_LOCK:
+        for record in records[-JOBS_MAX:]:
+            if not isinstance(record, dict) or not _JOB_ID_RE.match(str(record.get("id") or "")):
+                continue
+            job = {key: record.get(key) for key in _JOB_FIELDS}
+            job["result"] = _sanitise_result(job.get("result"))
+            if job.get("status") not in _TERMINAL:
+                job["status"] = "error"
+                job["error"] = "服务重启，任务已中断（未完成）"
+                job["finished"] = job.get("finished") or time.time()
+            JOBS[job["id"]] = job
+            restored += 1
+    return restored
+
+
+def _persist_loop() -> None:
+    """Coalesce writes: many status changes, at most a few disk writes."""
+    while not _PERSIST["stop"].is_set():
+        if _PERSIST["dirty"].wait(timeout=1.0):
+            _PERSIST["dirty"].clear()
+            dropped = _prune_jobs()
+            if dropped:
+                log(f"jobs history pruned: {len(dropped)} old record(s) (files kept)")
+            try:
+                _write_jobs()
+            except OSError as exc:
+                log(f"jobs history write failed: {exc}")
+            continue
+        _PERSIST["stop"].wait(0.0)  # idle tick
 
 
 def _collect_outputs(history_entry: dict, job_dir: Path) -> list[dict]:
@@ -218,7 +342,7 @@ def _collect_outputs(history_entry: dict, job_dir: Path) -> list[dict]:
             for item in node_out.get(kind) or []:
                 data = client.download(item["filename"], item.get("subfolder", ""),
                                        item.get("type", "output"))
-                dest = job_dir / item["filename"].replace("/", "_")
+                dest = job_dir / Path(str(item["filename"]).replace("\\", "/")).name
                 dest.write_bytes(data)
                 files.append({
                     "name": item["filename"],
@@ -266,10 +390,12 @@ def _worker() -> None:
             job["prompt_id"] = prompt_id
             log(f"job {job_id} ({task}) submitted as {prompt_id}")
 
-            def on_progress(_snap: dict) -> None:
-                s = _queue_snapshot()
-                if s:
-                    job["progress"] = s
+            def on_progress(snap: dict) -> None:
+                # ComfyClient.wait() already fetched /queue for this tick; reuse it
+                # instead of a second request every poll (was ~60 extra req/min).
+                running = snap.get("queue_running") or []
+                pending = snap.get("queue_pending") or []
+                job["progress"] = {"queue_remaining": len(running) + len(pending)}
 
             history = job_client.wait(prompt_id, on_progress=on_progress)
             job_dir = OUTPUT_DIR / job_id
@@ -279,15 +405,22 @@ def _worker() -> None:
                 job["status"] = "done"
             log(f"job {job_id} done: {len(files)} file(s)")
         except ComfyError as e:
-            job["status"] = "error"
-            job["error"] = str(e)[:2000]
-            log(f"job {job_id} failed: {str(e)[:300]}")
+            if job["status"] == "cancelled":
+                log(f"job {job_id} cancelled")
+            else:
+                job["status"] = "error"
+                job["error"] = str(e)[:2000]
+                log(f"job {job_id} failed: {str(e)[:300]}")
         except Exception as e:  # noqa: BLE001
-            job["status"] = "error"
-            job["error"] = f"{type(e).__name__}: {e}"
-            log(f"job {job_id} failed: {job['error'][:300]}")
+            if job["status"] == "cancelled":
+                log(f"job {job_id} cancelled")
+            else:
+                job["status"] = "error"
+                job["error"] = f"{type(e).__name__}: {e}"
+                log(f"job {job_id} failed: {job['error'][:300]}")
         finally:
             job["finished"] = time.time()
+            _mark_dirty()
 
 
 def _load_plugin_module(name: str):
@@ -323,6 +456,8 @@ def _run_direct_task(job: dict) -> None:
     params = dict(job["params"])
     if job["task"] in ("video_download", "wechat_download"):
         _run_video_download(job, params)
+    elif job["task"] == "file_download":
+        _run_file_download(job, params)
     else:
         raise ValueError(f"unknown direct task {job['task']}")
 
@@ -565,10 +700,115 @@ def _run_video_download(job: dict, params: dict) -> None:
     log(f"job {job['id']} done: {path.name} ({size/1048576:.1f} MB)")
 
 
+def _unique_path(directory: Path, stem: str, suffix: str) -> Path:
+    """`name.ext`, `name (1).ext`, … never clobber an existing file."""
+    cand = directory / f"{stem}{suffix}"
+    i = 1
+    while cand.exists():
+        cand = directory / f"{stem} ({i}){suffix}"
+        i += 1
+    return cand
+
+
+def _run_file_download(job: dict, params: dict) -> None:
+    """Direct-link download with parallel ranges (shared musefish_fastdl module).
+
+    Built for CDNs that throttle each connection (CivitAI b2, S3-compatible):
+    a browser or single curl crawls at ~100 KB/s while 32-64 ranged requests
+    aggregate to the link's real bandwidth. Resumes a `.part` file, and keeps
+    signed query strings intact.
+    """
+    # 与 ComfyUI 节点共用同一份实现（插件包 musefish_fastdl），避免两套行为漂移
+    fastdl = _load_plugin_module("musefish_fastdl")
+
+    url = (params.get("url") or "").strip().strip('"').strip("'")
+    if not url.lower().startswith(("http://", "https://")):
+        raise fastdl.DownloadError("请填写 http(s) 直链地址（含完整查询串，如签名参数）")
+
+    conns = max(1, min(int(params.get("conns") or 32), 64))
+    want_proxy = (params.get("proxy") or "auto").strip()
+    log(f"文件断点续传：{url[:180]}")
+    try:
+        info, proxy, route = fastdl.probe_with_route(
+            url, want_proxy, config_proxy=CONFIG.get("proxy"), timeout=45,
+            should_stop=lambda: job.get("status") == "cancelled", log=log)
+    except fastdl.Cancelled:
+        raise
+    log(f"代理：{route}")
+
+    total = info["size"]
+    size_label = f"{total / 1048576:.1f} MB" if total else "大小未知"
+    log(f"远端 {size_label} · 分片{'支持' if info['ranges'] else '不支持'} · "
+        f"{info['content_type'] or '未知类型'} · {route}")
+
+    save_dir = (params.get("save_dir") or "").strip()
+    target_dir = Path(save_dir).expanduser() if save_dir else fastdl.desktop_dir()
+    if not target_dir.is_absolute():
+        target_dir = (ROOT / target_dir).resolve()
+    target_dir.mkdir(parents=True, exist_ok=True)
+    name = fastdl.safe_name(params.get("filename") or info["filename"])
+    dest = _unique_path(target_dir, Path(name).stem, Path(name).suffix)
+
+    t0 = time.time()
+
+    def on_progress(progress) -> None:
+        """引擎已把 (done,total) 折算成速率/ETA，这里只负责搬进任务状态。"""
+        job["progress"] = {
+            "pct": round(progress.percent, 1) if progress.total else None,
+            "speed": round(progress.speed / 1048576, 2),
+            "done": progress.done,
+            "total": progress.total,
+            "eta": round(progress.eta, 1) if progress.eta is not None else None,
+            "elapsed": round(progress.elapsed, 1),
+            "resumed": progress.resumed,
+            "text": progress.text(),
+        }
+
+    reporter = fastdl.ProgressReporter(on_progress, interval=0.4)
+    res = fastdl.download(url, dest, conns=conns, proxy=proxy, timeout=45,
+                          on_progress=reporter,
+                          should_stop=lambda: job.get("status") == "cancelled",
+                          probe_info=info)
+
+    size = Path(res["path"]).stat().st_size
+    elapsed = max(time.time() - t0, 1e-6)
+    try:
+        Path(res["path"]).resolve().relative_to(OUTPUT_DIR.resolve())
+        inside = True
+    except (ValueError, OSError):
+        inside = False
+    job["result"] = {
+        "outputs": [{
+            "name": Path(res["path"]).name,
+            "path": res["path"],
+            "url": f"/files/{job['id']}/{quote(Path(res['path']).name)}" if inside else "",
+            "bytes": size,
+        }],
+        "info": {
+            "avg_mbps": round(size / elapsed / 1048576, 2),
+            "seconds": round(elapsed, 1),
+            "conns": conns,
+            "ranges": res.get("ranges", True),
+            "proxy": proxy or "direct",
+            "route": route,
+        },
+    }
+    job["status"] = "done"
+    log(f"文件断点续传完成：{res['path']} ({size / 1048576:.1f} MB, "
+        f"{size / elapsed / 1048576:.2f} MB/s, {elapsed:.0f}s)")
+
+
 def _resolve_input(input_path: str) -> Path:
     p = Path(input_path)
     if p.is_file():
-        return p
+        resolved = p.resolve()
+        for base in (UPLOAD_DIR, ROOT):
+            try:
+                resolved.relative_to(base.resolve())
+            except ValueError:
+                continue
+            return resolved
+        raise PermissionError(f"input path outside the studio workspace: {input_path}")
     for base in (UPLOAD_DIR, ROOT):
         q = base / input_path
         if q.is_file():
@@ -658,6 +898,10 @@ def apply_comfy_endpoint(host: str, port: int, *, persist: bool = True) -> dict:
     port = int(port)
     if not (1 <= port <= 65535):
         return {"ok": False, "error": "port out of range"}
+    if host not in ("127.0.0.1", "localhost", "::1"):
+        # Only a local ComfyUI is a valid target: any other host would let the
+        # studio upload local files to a third party.
+        return {"ok": False, "error": "host must be loopback (127.0.0.1/localhost/::1)"}
     COMFY_HOST, COMFY_PORT = host, port
     client = ComfyClient(host, port)
     if persist:
@@ -827,13 +1071,22 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _file(self, path: Path, code: int = 200) -> None:
+    def _file_headers(self, ctype: str, download: bool) -> None:
+        """Shared header block; `nosniff` keeps a mislabelled upload from being run."""
+        self.send_header("Content-Type", ctype)
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if download:
+            self.send_header("Content-Disposition", "attachment")
+
+    def _file(self, path: Path, code: int = 200, download: bool = False) -> None:
         try:
             size = path.stat().st_size
         except OSError:
             self._json({"error": "not found"}, 404)
             return
         ctype = MIME.get(path.suffix.lower(), "application/octet-stream")
+        if download:
+            ctype = "application/octet-stream"
         rng = self.headers.get("Range")
         if rng and rng.startswith("bytes="):
             # media playback in Chromium requires 206 partial content
@@ -859,7 +1112,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 return
             self.send_response(206)
-            self.send_header("Content-Type", ctype)
+            self._file_headers(ctype, download)
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
             self.send_header("Content-Length", str(end - start + 1))
             self.send_header("Accept-Ranges", "bytes")
@@ -875,25 +1128,65 @@ class Handler(BaseHTTPRequestHandler):
                     self.wfile.write(chunk)
                     remaining -= len(chunk)
             return
-        try:
-            body = path.read_bytes()
-        except OSError:
-            self._json({"error": "not found"}, 404)
-            return
+        # Stream the body: read_bytes() held the whole file (a 64 MiB export cost
+        # 64 MiB of peak allocation, and parallel downloads multiplied it).
         self.send_response(code)
-        self.send_header("Content-Type", ctype)
-        self.send_header("Content-Length", str(len(body)))
+        self._file_headers(ctype, download)
+        self.send_header("Content-Length", str(size))
         self.send_header("Accept-Ranges", "bytes")
         self.send_header("Cache-Control", "no-cache")
         self.end_headers()
-        self.wfile.write(body)
+        remaining = size
+        with open(path, "rb") as f:
+            while remaining > 0:
+                chunk = f.read(min(1 << 20, remaining))
+                if not chunk:
+                    break
+                self.wfile.write(chunk)
+                remaining -= len(chunk)
 
     def _body(self) -> bytes:
         length = int(self.headers.get("Content-Length") or 0)
         return self.rfile.read(length) if length else b""
 
+    # ---- request guard
+    def _guard(self) -> bool:
+        """Loopback-only + same-origin + explicit client header.
+
+        The server is a privileged local API: without these checks any web page
+        could POST /api/jobs (arbitrary save_dir) or repoint the ComfyUI endpoint
+        at an attacker host, and DNS rebinding could read /api/log.
+        """
+        host = (self.headers.get("Host") or "").strip().lower()
+        allowed = {f"127.0.0.1:{PORT}", f"localhost:{PORT}", f"[::1]:{PORT}"}
+        if host not in allowed:
+            self._json({"error": "host not allowed"}, 403)
+            return False
+        origin = (self.headers.get("Origin") or "").strip().rstrip("/").lower()
+        if origin and origin not in {f"http://127.0.0.1:{PORT}", f"http://localhost:{PORT}",
+                                     f"http://[::1]:{PORT}"}:
+            self._json({"error": "origin not allowed"}, 403)
+            return False
+        # Browser-initiated cross-site requests are the threat (a page the user
+        # happens to have open). Local scripts/curl stay usable: no Origin and no
+        # cross-site Sec-Fetch-Site means "not a browser page from elsewhere".
+        if self.command in ("POST", "PUT", "DELETE"):
+            site = (self.headers.get("Sec-Fetch-Site") or "").strip().lower()
+            if site and site not in ("same-origin", "none"):
+                self._json({"error": "cross-site request blocked"}, 403)
+                return False
+            # A custom header cannot be sent cross-origin without a preflight, so
+            # requiring it closes the "no-Origin plain form POST" hole this guard
+            # documents. Same-origin UI and local scripts both send it.
+            if (self.headers.get("X-Musefish-Client") or "").strip() != "1":
+                self._json({"error": "X-Musefish-Client: 1 required for changes"}, 403)
+                return False
+        return True
+
     # ---- routes
     def do_GET(self):  # noqa: N802
+        if not self._guard():
+            return
         path = self.path.split("?", 1)[0]
         try:
             if path in ("/", "/index.html"):
@@ -916,6 +1209,14 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(env_info())
             elif path == "/api/models/manifest":
                 self._json(model_manifest())
+            elif path == "/api/download/options":
+                fastdl = _load_plugin_module("musefish_fastdl")
+                auto_url, auto_label = fastdl.auto_proxy_endpoint(CONFIG.get("proxy"))
+                self._json({
+                    "save_dir": str(fastdl.desktop_dir()),
+                    "proxies": fastdl.detect_proxies(),
+                    "auto": {"url": auto_url, "label": auto_label},
+                })
             elif path == "/api/log":
                 with _log_lock:
                     self._json({"lines": list(_log_tail)})
@@ -938,15 +1239,17 @@ class Handler(BaseHTTPRequestHandler):
                 jid = path.rsplit("/", 1)[1]
                 with JOBS_LOCK:
                     job = JOBS.get(jid)
-                    self._json(dict(job) if job else {"error": "no such job"}, 200 if job else 404)
+                    self._json(_job_record(job) if job else {"error": "no such job"}, 200 if job else 404)
             elif path.startswith("/files/"):
-                rel = path[len("/files/"):]
-                dest = (OUTPUT_DIR / rel).resolve()
-                if not str(dest).startswith(str(OUTPUT_DIR)) or not dest.is_file():
+                rel = unquote(path[len("/files/"):])
+                dest = _contained_output(rel)
+                if dest is None or not dest.is_file():
                     self._json({"error": "not found"}, 404)
                     return
                 try:
-                    self._file(dest)
+                    self._file(dest, download=dest.suffix.lower() not in
+                               (".png", ".jpg", ".jpeg", ".webp", ".gif", ".mp4", ".webm",
+                                ".mov", ".mp3", ".wav", ".flac", ".m4a", ".ogg"))
                 except (BrokenPipeError, ConnectionResetError):
                     pass  # client closed mid-stream (normal for video seek)
                 except Exception as e:  # noqa: BLE001
@@ -968,6 +1271,8 @@ class Handler(BaseHTTPRequestHandler):
                 pass
 
     def do_POST(self):  # noqa: N802
+        if not self._guard():
+            return
         path = self.path.split("?", 1)[0]
         try:
             if path == "/api/upload":
@@ -985,7 +1290,7 @@ class Handler(BaseHTTPRequestHandler):
                 if task not in DIRECT_TASKS and not params.get("input_path"):
                     self._json({"error": "input_path required"}, 400)
                     return
-                if task == "video_download" and not params.get("url"):
+                if task in ("video_download", "file_download") and not params.get("url"):
                     self._json({"error": "url required"}, 400)
                     return
                 job = _new_job(task, params)
@@ -1037,8 +1342,9 @@ class Handler(BaseHTTPRequestHandler):
                             "output": (r.stdout + r.stderr)[-6000:]})
             elif path == "/api/comfy/endpoint":
                 req = json.loads(self._body() or b"{}")
-                self._json(apply_comfy_endpoint(req.get("host", COMFY_HOST),
-                                                req.get("port", COMFY_PORT)))
+                res = apply_comfy_endpoint(req.get("host", COMFY_HOST),
+                                           req.get("port", COMFY_PORT))
+                self._json(res, 200 if res.get("ok") else 400)
             elif path == "/api/comfy/scan":
                 self._json({"found": scan_comfy_ports()})
             else:
@@ -1047,6 +1353,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"error": f"{type(e).__name__}: {e}"}, 500)
 
     def do_DELETE(self):  # noqa: N802
+        if not self._guard():
+            return
         path = self.path.split("?", 1)[0]
         if path == "/api/outputs":
             # one-click cleanup: remove every job output dir AND the matching
@@ -1097,6 +1405,7 @@ class Handler(BaseHTTPRequestHandler):
                     # still queued locally: mark cancelled; worker checks the
                     # terminal state before submit and skips it
                     job["status"] = "cancelled"
+                    _mark_dirty()
                     log(f"job {jid} cancelled before submit")
                     self._json({"ok": True})
                     return
@@ -1120,6 +1429,7 @@ class Handler(BaseHTTPRequestHandler):
                 except Exception as e:  # noqa: BLE001
                     log(f"cancel failed: {e}")
                 job["status"] = "cancelled"
+                _mark_dirty()
             self._json({"ok": True})
         else:
             self._json({"error": "unknown route"}, 404)
@@ -1127,19 +1437,33 @@ class Handler(BaseHTTPRequestHandler):
     # ---- multipart (single file, field name "file")
     def _save_multipart(self) -> dict:
         ctype = self.headers.get("Content-Type", "")
-        m = re.search(r"boundary=(.+)", ctype)
+        m = re.search(r'boundary=(.+)$', ctype.strip())
         if not m:
             raise ValueError("expected multipart/form-data")
-        boundary = m.group(1).strip().encode()
+        boundary = m.group(1).strip().strip('"').encode()
         length = int(self.headers.get("Content-Length") or 0)
+        if length <= 0:
+            raise ValueError("empty upload body")
         stream = self.rfile
-        # stream-parse: read headers line, then payload up to boundary
-        line = stream.readline()
-        if not line.startswith(b"--" + boundary):
+        # Count every byte taken off the socket: the body length is only knowable
+        # from Content-Length minus what the boundary/header reads already consumed.
+        consumed = 0
+
+        def read_line() -> bytes:
+            nonlocal consumed
+            line = stream.readline()
+            consumed += len(line)
+            return line
+
+        def remaining() -> int:
+            return max(0, length - consumed)
+
+        start = read_line()
+        if not start.startswith(b"--" + boundary):
             raise ValueError("bad multipart start")
         headers = {}
         while True:
-            line = stream.readline()
+            line = read_line()
             if line in (b"\r\n", b"\n", b""):
                 break
             k, _, v = line.decode("utf-8", "replace").partition(":")
@@ -1149,39 +1473,37 @@ class Handler(BaseHTTPRequestHandler):
         orig = name_m.group(1) if name_m else "upload.bin"
         safe = re.sub(r'[\\/:*?"<>|]+', "_", Path(orig).name) or "upload.bin"
         marker = b"\r\n--" + boundary
-        buf = bytearray()
         chunk_sz = 1 << 20
-        end = -1
-        # bytes already consumed from the socket by the boundary/header reads:
-        # only read what actually remains, or HTTP/1.1 keep-alive stalls forever
-        preamble = len(b"--" + boundary) + len(line) + 1 + 2  # start line + CRLF terminator line
-        remaining_body = max(0, length - preamble)
-        # read until boundary found
         window = b""
+        found = False
         tmp_path = UPLOAD_DIR / (uuid.uuid4().hex + ".part")
-        total = 0
         try:
             with open(tmp_path, "wb") as f:
-                while remaining_body > 0:
-                    chunk = stream.read(min(chunk_sz, remaining_body))
+                while remaining() > 0:
+                    chunk = stream.read(min(chunk_sz, remaining()))
                     if not chunk:
                         break
-                    total += len(chunk)
-                    remaining_body -= len(chunk)
+                    consumed += len(chunk)
                     window += chunk
                     idx = window.find(marker)
                     if idx >= 0:
-                        keep = window[:idx]
-                        f.write(keep)
-                        end = total - (len(window) - idx)
+                        f.write(window[:idx])
+                        found = True
                         break
-                    # keep last len(marker) bytes in window to catch boundary spanning chunks
+                    # keep the tail that could be the start of a boundary
                     safe_keep = len(window) - len(marker)
                     if safe_keep > 0:
                         f.write(window[:safe_keep])
                         window = window[safe_keep:]
-                if end < 0:
-                    raise ValueError("multipart end not found")
+            if not found:
+                raise ValueError("multipart end not found")
+            # Drain the epilogue (\r\n--boundary--\r\n): leaving bytes unread
+            # desyncs the next keep-alive request on the same connection.
+            while remaining() > 0:
+                chunk = stream.read(min(chunk_sz, remaining()))
+                if not chunk:
+                    break
+                consumed += len(chunk)
         except Exception:
             tmp_path.unlink(missing_ok=True)  # never leave .part litter
             raise
@@ -1189,8 +1511,6 @@ class Handler(BaseHTTPRequestHandler):
         final = UPLOAD_DIR / f"{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}_{safe}"
         os.replace(tmp_path, final)
         return {"path": str(final), "name": final.name, "bytes": final.stat().st_size}
-
-
 def main() -> None:
     # Refuse to double-start: if the port already serves OUR workbench, exit
     # so the new copy never fights the old one for requests (random routing).
@@ -1214,6 +1534,11 @@ def main() -> None:
         log("FATAL: 未找到 ComfyUI 引擎（data/comfyui 或 comfy junction）。")
         log("       自包含形态: python tools/env_setup.py   开发机: python tools/link_models.py")
         raise SystemExit(3)
+    restored = _load_jobs()
+    if restored:
+        log(f"jobs history restored: {restored} record(s) from {JOBS_FILE.name}")
+    persist_thread = threading.Thread(target=_persist_loop, daemon=True, name="jobs-persist")
+    persist_thread.start()
     threading.Thread(target=supervisor.watchdog, daemon=True, name="comfy-watchdog").start()
     if COMFY_AUTOSTART:
         def boot() -> None:
@@ -1230,6 +1555,14 @@ def main() -> None:
         httpd.serve_forever()
     except KeyboardInterrupt:
         supervisor.stop()
+    finally:
+        _PERSIST["stop"].set()
+        _PERSIST["dirty"].set()
+        persist_thread.join(timeout=5.0)   # the writer finishes before the last flush
+        try:
+            _write_jobs()          # last state, including anything just finished
+        except OSError:
+            pass
 
 
 if __name__ == "__main__":

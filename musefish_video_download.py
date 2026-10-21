@@ -16,11 +16,15 @@ Module layout:
 from __future__ import annotations
 
 import base64
+import importlib
 import json
 import os
+import queue
 import re
 import shutil
 import subprocess
+import sys
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -217,61 +221,103 @@ def _stream_to_file(
         return urllib.request.build_opener(*handlers)
 
     opener = _opener()
-    request = urllib.request.Request(
-        url,
-        headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-            "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
-        },
-    )
+    ua_headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36"
+    }
+    request = urllib.request.Request(url, headers=ua_headers)
     with opener.open(request, timeout=60) as response:
         length = response.headers.get("Content-Length")
         total = int(length) if length and length.isdigit() else 0
 
+    def supports_ranges() -> bool:
+        """One-byte probe: ranged workers are only safe when the server honours
+        Range exactly (status 206 + a matching Content-Range)."""
+        try:
+            with opener.open(_range_request(url, 0, 0, ua_headers), timeout=30) as probe:
+                span = _content_range(probe.headers.get("Content-Range"))
+                return probe.status == 206 and span is not None and span[0] == 0
+        except (urllib.error.URLError, OSError, ValueError):
+            return False
+
     parallel = max(1, min(16, int(parallel)))
-    if total > _DOWNLOAD_CHUNK and parallel > 1:
-        # Ranged segments fetched by a thread pool, assembled in order.
-        from concurrent.futures import ThreadPoolExecutor
+    received = 0
+    try:
+        if total > _DOWNLOAD_CHUNK and parallel > 1 and supports_ranges():
+            # Ranged segments are streamed straight into their byte offsets, so
+            # peak memory stays at one chunk per connection instead of the file.
+            from concurrent.futures import ThreadPoolExecutor
 
-        bounds = []
-        seg = total // parallel
-        for i in range(parallel):
-            start = i * seg
-            end = (total - 1) if i == parallel - 1 else (start + seg - 1)
-            bounds.append((start, end))
+            seg = total // parallel
+            bounds = []
+            for i in range(parallel):
+                start = i * seg
+                end = (total - 1) if i == parallel - 1 else (start + seg - 1)
+                bounds.append((start, end))
 
-        done = [0]
+            done_bytes = 0
+            counter = threading.Lock()
+            target.parent.mkdir(parents=True, exist_ok=True)
+            with open(target, "wb") as prealloc:
+                prealloc.truncate(total)
 
-        def fetch(span):
-            start, end = span
-            status, _, data = _http_get(
-                url, headers={"Range": f"bytes={start}-{end}"}, timeout=180.0
-            )
-            return start, data
+            def fetch(span: tuple[int, int]) -> int:
+                nonlocal done_bytes
+                start, end = span
+                with opener.open(_range_request(url, start, end, ua_headers), timeout=180) as response:
+                    if response.status != 206:
+                        raise DownloadError(
+                            f"server ignored Range (status {response.status}) for bytes={start}-{end}"
+                        )
+                    span_total = _content_range(response.headers.get("Content-Range"))
+                    if span_total is None or span_total[0] != start or span_total[1] != end:
+                        raise DownloadError(
+                            "Content-Range mismatch: asked "
+                            f"bytes={start}-{end}, got "
+                            f"{response.headers.get('Content-Range')!r}"
+                        )
+                    if span_total[2] is not None and span_total[2] != total:
+                        raise DownloadError(
+                            f"remote size changed mid-download: {span_total[2]} != {total}"
+                        )
+                    want = end - start + 1
+                    written = 0
+                    with open(target, "r+b") as sink:
+                        sink.seek(start)
+                        while written < want:
+                            block = response.read(min(_DOWNLOAD_CHUNK, want - written))
+                            if not block:
+                                raise DownloadError(
+                                    f"short range body: {written}/{want} bytes for bytes={start}-{end}"
+                                )
+                            sink.write(block)
+                            written += len(block)
+                            with counter:
+                                done_bytes += len(block)
+                                reporter.fraction(min(0.95, done_bytes / total))
+                return written
 
-        parts: dict[int, bytes] = {}
-        with ThreadPoolExecutor(max_workers=parallel) as pool:
-            for start, data in pool.map(fetch, bounds):
-                parts[start] = data
-                done[0] += 1
-                reporter.fraction(min(0.95, done[0] / parallel))
-
-        with open(target, "wb") as sink:
-            for start in sorted(parts):
-                sink.write(parts[start])
-        received = total
-    else:
-        received = 0
-        with opener.open(request, timeout=60) as response, open(target, "wb") as sink:
-            while True:
-                chunk = response.read(_DOWNLOAD_CHUNK)
-                if not chunk:
-                    break
-                sink.write(chunk)
-                received += len(chunk)
-                if total:
-                    reporter.fraction(min(0.95, received / total))
-    if total and received < total:
+            with ThreadPoolExecutor(max_workers=parallel) as pool:
+                received = sum(future.result() for future in [pool.submit(fetch, b) for b in bounds])
+        else:
+            with opener.open(request, timeout=60) as response, open(target, "wb") as sink:
+                while True:
+                    chunk = response.read(_DOWNLOAD_CHUNK)
+                    if not chunk:
+                        break
+                    sink.write(chunk)
+                    received += len(chunk)
+                    if total:
+                        reporter.fraction(min(0.95, received / total))
+    except BaseException:
+        # A partial target must never be published: delete it and let the node
+        # report the failure instead of handing ComfyUI a truncated video.
+        try:
+            target.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
+    if total and received != total:
         raise DownloadError(
             f"incomplete download: {received}/{total} bytes from {url[:100]}"
         )
@@ -408,6 +454,92 @@ def _ytdlp_module():
         ) from error
 
 
+_YTDLP_STAMP = Path(__file__).with_name("_ytdlp_update_stamp.json")
+_YTDLP_AUTO_COOLDOWN = 6 * 3600  # seconds; one upgrade attempt per window
+# Extractor breakage looks like this; transport trouble must NOT trigger pip.
+_YTDLP_EXTRACTOR_HINTS = (
+    "unable to extract", "unsupported url", "nsig", "signature", "player response",
+    "no video formats", "requested format is not available", "unable to download video data",
+    "http error 403", "failed to parse", "extractor", "unable to extract yt initial",
+    "content isn't available", "this video is unavailable", "unable to extract data",
+)
+_YTDLP_TRANSPORT_HINTS = (
+    "timed out", "timeout", "connection reset", "ssl", "getaddrinfo", "proxy",
+    "temporary failure", "name or service not known", "network is unreachable",
+)
+
+
+def _looks_like_extractor_failure(error: Exception) -> bool:
+    """True when upgrading yt-dlp is plausibly the fix."""
+    text = f"{type(error).__name__}: {error}".lower()
+    if any(hint in text for hint in _YTDLP_TRANSPORT_HINTS):
+        return False
+    return any(hint in text for hint in _YTDLP_EXTRACTOR_HINTS)
+
+
+def _ytdlp_version() -> str:
+    try:
+        from importlib.metadata import version
+
+        return version("yt-dlp")
+    except Exception:  # noqa: BLE001 - diagnostic only
+        return ""
+
+
+def _reload_ytdlp() -> None:
+    """Drop the imported package so a fresh install takes effect immediately."""
+    for name in [n for n in list(sys.modules) if n == "yt_dlp" or n.startswith("yt_dlp.")]:
+        sys.modules.pop(name, None)
+    importlib.invalidate_caches()
+
+
+def _auto_update_ytdlp(log: list[str] | None = None) -> bool:
+    """Upgrade yt-dlp in this interpreter after a site stops being parsable.
+
+    Runs only when an extractor failure was actually observed (never at
+    import), at most once per cooldown window, and reports exactly what it did
+    so the node output shows the version bump.
+    """
+    now = time.time()
+    try:
+        stamp = json.loads(_YTDLP_STAMP.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        stamp = {}
+    if now - float(stamp.get("auto_ts", 0) or 0) < _YTDLP_AUTO_COOLDOWN:
+        message = "yt-dlp 刚升级过（6 小时内），本次不再自动升级"
+        if log is not None:
+            log.append(message)
+        return False
+    stamp["auto_ts"] = now
+    try:
+        _YTDLP_STAMP.write_text(json.dumps(stamp), encoding="utf-8")
+    except OSError:
+        pass
+
+    before = _ytdlp_version()
+    base = [sys.executable, "-m", "pip", "install", "-U", "--disable-pip-version-check", "yt-dlp"]
+    attempts = [base, base + ["-i", "https://pypi.tuna.tsinghua.edu.cn/simple"]]
+    for index, command in enumerate(attempts):
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=600)
+        except (OSError, subprocess.SubprocessError) as exc:
+            if log is not None:
+                log.append(f"yt-dlp 自动升级失败：{exc}")
+            continue
+        if result.returncode == 0:
+            _reload_ytdlp()
+            after = _ytdlp_version()
+            message = f"站点解析失败，已自动升级 yt-dlp：{before or '?'} → {after or '?'}"
+            if log is not None:
+                log.append(message)
+            print(f"[MusefishVideoDownload] {message}", flush=True)
+            return True
+        if log is not None and index == len(attempts) - 1:
+            tail = (result.stderr or result.stdout or "").strip().splitlines()[-1:] or ["无输出"]
+            log.append(f"yt-dlp 自动升级失败：{tail[0][:200]}")
+    return False
+
+
 _YTDLP_PROXY = "http://127.0.0.1:7897"  # Clash Verge mixed port (local)
 _YTDLP_COOKIES = Path(__file__).with_name("_yt_cookies.txt")  # Netscape format
 
@@ -504,23 +636,54 @@ def download_with_ytdlp(
     if cookies_file is not None and cookies_file.exists():
         opts["cookiefile"] = str(cookies_file)
 
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=True)
-        requested = info.get("requested_downloads") or []
-        for entry in requested:
-            path = entry.get("filepath") or entry.get("filename")
-            if path:
-                return Path(path), info
-        # Some extractors report the final file only through prepare_filename.
-        final = Path(ydl.prepare_filename(info))
-        if final.suffix != ".mp4" and final.with_suffix(".mp4").exists():
-            final = final.with_suffix(".mp4")
-        if final.exists():
-            return final, info
-        raise DownloadError(f"yt-dlp finished but no output file was found for {url}")
+    def run(module):
+        with module.YoutubeDL(opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            requested = info.get("requested_downloads") or []
+            for entry in requested:
+                path = entry.get("filepath") or entry.get("filename")
+                if path:
+                    return Path(path), info
+            # Some extractors report the final file only through prepare_filename.
+            final = Path(ydl.prepare_filename(info))
+            if final.suffix != ".mp4" and final.with_suffix(".mp4").exists():
+                final = final.with_suffix(".mp4")
+            if final.exists():
+                return final, info
+            raise DownloadError(f"yt-dlp finished but no output file was found for {url}")
+
+    try:
+        return run(yt_dlp)
+    except Exception as error:  # noqa: BLE001 - classified below
+        # A site that used to work now fails to parse: the extractor is stale.
+        # Upgrade yt-dlp once and retry with the freshly imported module; any
+        # transport/proxy failure is re-raised untouched.
+        if not _looks_like_extractor_failure(error) or not _auto_update_ytdlp(log):
+            raise
+        try:
+            return run(_ytdlp_module())
+        except Exception as retry_error:  # noqa: BLE001
+            raise DownloadError(
+                f"自动升级 yt-dlp 后仍无法解析 {url[:100]}：{retry_error}"
+            ) from retry_error
 
 
 # ---------------------------------------------------------------- HTTP
+
+
+def _content_range(value: str | None) -> tuple[int, int, int | None] | None:
+    """Parse ``Content-Range: bytes start-end/total`` (``*`` -> None total)."""
+    match = re.match(r"bytes\s+(\d+)-(\d+)/(\d+|\*)", (value or "").strip())
+    if not match:
+        return None
+    total = match.group(3)
+    return int(match.group(1)), int(match.group(2)), (None if total == "*" else int(total))
+
+
+def _range_request(url: str, start: int, end: int, headers: dict) -> urllib.request.Request:
+    merged = {"Range": f"bytes={start}-{end}"}
+    merged.update(headers)
+    return urllib.request.Request(url, headers=merged)
 
 
 def _http_get(
@@ -546,9 +709,10 @@ def _http_range(
     headers: dict | None = None,
     timeout: float = 120.0,
     proxy: str | None = None,
-) -> tuple[int, bytes]:
-    """Fetch ``url[start..end]``. Returns ``(status, body)``; status 200 means
-    the server ignored the Range header and ``body`` is the whole file."""
+) -> tuple[int, dict, bytes]:
+    """Fetch ``url[start..end]``. Returns ``(status, headers, body)``; status
+    200 means the server ignored the Range header and ``body`` is the whole
+    file, so callers must slice by the response start, never by their own."""
     merged = {"Range": f"bytes={start}-{end}"}
     merged.update(headers or {})
     request = urllib.request.Request(url, headers=merged)
@@ -558,8 +722,7 @@ def _http_range(
     else:
         opener = urllib.request.build_opener()
     with opener.open(request, timeout=timeout) as response:
-        _capture_headers(dict(response.headers))
-        return response.status, response.read()
+        return response.status, dict(response.headers), response.read()
 
 
 # ------------------------------------------------------------------ WC
@@ -604,6 +767,11 @@ class KeystreamDaemon:
     def __init__(self):
         self._proc = None
         self._next_id = 1
+        # One request at a time: interleaved writers would hand each other's
+        # replies to the wrong caller.
+        self._lock = threading.Lock()
+        self._lines: "queue.Queue[str | None]" = queue.Queue()
+        self._reader: threading.Thread | None = None
 
     def _start(self):
         import sys
@@ -622,6 +790,38 @@ class KeystreamDaemon:
             encoding="utf-8",
             creationflags=creationflags,
         )
+        self._lines = queue.Queue()
+
+        def pump(stream) -> None:
+            try:
+                for line in stream:
+                    self._lines.put(line)
+            except (ValueError, OSError):
+                pass
+            finally:
+                self._lines.put(None)  # EOF sentinel
+
+        self._reader = threading.Thread(target=pump, args=(self._proc.stdout,),
+                                        daemon=True, name="keystream-reader")
+        self._reader.start()
+
+    def _kill(self) -> None:
+        """Terminate the daemon and drop its pipes after a timeout/EOF."""
+        proc, self._proc = self._proc, None
+        self._lines = queue.Queue()
+        if proc is None:
+            return
+        if proc.poll() is None:
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        for stream in (proc.stdin, proc.stdout):
+            try:
+                if stream is not None:
+                    stream.close()
+            except OSError:
+                pass
 
     def _ensure(self):
         if self._proc is not None and self._proc.poll() is not None:
@@ -631,30 +831,52 @@ class KeystreamDaemon:
         return self._proc
 
     def _call(self, request: dict, timeout: float) -> dict:
-        proc = self._ensure()
-        request = dict(request)
-        request["id"] = self._next_id
-        self._next_id += 1
-        try:
-            proc.stdin.write(json.dumps(request) + "\n")
-            proc.stdin.flush()
-        except (BrokenPipeError, ValueError) as error:
-            raise DownloadError(f"keystream daemon pipe broke: {error}") from error
-        deadline = time.monotonic() + timeout
-        while True:
-            line = proc.stdout.readline()
-            if not line:
-                raise DownloadError("keystream daemon exited unexpectedly")
-            line = line.strip()
-            if not line:
-                continue
+        with self._lock:
+            proc = self._ensure()
+            request = dict(request)
+            request["id"] = self._next_id
+            self._next_id += 1
             try:
-                message = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if message.get("id") != request["id"]:
-                continue
-            return message
+                proc.stdin.write(json.dumps(request) + "\n")
+                proc.stdin.flush()
+            except (BrokenPipeError, ValueError, OSError) as error:
+                self._kill()
+                raise DownloadError(f"keystream daemon pipe broke: {error}") from error
+            deadline = time.monotonic() + timeout
+            # Replies arrive on a reader thread, so a daemon stuck inside wasm
+            # cannot block this call forever: queue.get() honours the deadline.
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    self._kill()
+                    raise DownloadError(
+                        f"keystream daemon timed out after {timeout:g}s (process killed)"
+                    )
+                try:
+                    line = self._lines.get(timeout=min(remaining, 1.0))
+                except queue.Empty:
+                    if proc.poll() is not None:
+                        code = proc.returncode
+                        self._kill()
+                        raise DownloadError(f"keystream daemon exited (code {code})")
+                    continue
+                if line is None:
+                    try:
+                        code = proc.wait(timeout=1.0)
+                    except subprocess.TimeoutExpired:
+                        code = "unknown"
+                    self._kill()
+                    raise DownloadError(f"keystream daemon exited (code {code})")
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    message = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if message.get("id") != request["id"]:
+                    continue  # stale reply from a killed request; keep waiting
+                return message
 
     def generate(self, decode_key: str) -> bytes:
         """Return the 128 KiB keystream for ``decode_key`` (cached daemon-side)."""
@@ -676,8 +898,8 @@ class KeystreamDaemon:
             try:
                 self._call({"op": "shutdown"}, timeout=5.0)
             except DownloadError:
-                self._proc.kill()
-        self._proc = None
+                pass  # _kill() inside _call already reaped it
+        self._kill()
 
 
 _SHARED_DAEMON: KeystreamDaemon | None = None
@@ -734,7 +956,7 @@ def download_wechat_encrypted(
     if log is not None:
         log.append(f"keystream ready for decode_key {decode_key} ({len(keystream)} bytes)")
 
-    _probe_status, probe_head = _http_range(full_url, 0, 262143, timeout=60.0)
+    _probe_status, probe_headers, probe_head = _http_range(full_url, 0, 262143, timeout=60.0)
     if not verify_encrypted_header(probe_head, keystream):
         raise DownloadError(
             "decode_key does not decrypt this URL (ftyp mismatch). "
@@ -748,7 +970,6 @@ def download_wechat_encrypted(
 
     # Range support is decided by the Content-Range header, not the status
     # value: file:// and some proxies answer with status None or 200.
-    probe_headers = _last_http_headers or {}
     content_range = next(
         (v for k, v in probe_headers.items() if k.lower() == "content-range"), None
     )
@@ -785,19 +1006,42 @@ def download_wechat_encrypted(
                 chunk_start = received
                 chunk_end = min(chunk_start + _DOWNLOAD_CHUNK - 1,
                                 (total or chunk_start + _DOWNLOAD_CHUNK) - 1)
-                _status, data = _http_range(full_url, chunk_start, chunk_end, timeout=180.0)
+                status, chunk_headers, data = _http_range(
+                    full_url, chunk_start, chunk_end, timeout=180.0
+                )
+                expect = chunk_end - chunk_start + 1
+                span = _content_range(
+                    next((v for k, v in chunk_headers.items() if k.lower() == "content-range"), None)
+                )
+                if status != 206 or span is None:
+                    # The server stopped honouring Range. Re-download the whole
+                    # file through the non-ranged path instead of stitching a
+                    # body that starts at byte zero onto the current offset.
+                    raise DownloadError(
+                        f"server stopped honouring Range at byte {received} "
+                        f"(status {status}); retry the download"
+                    )
+                if span[0] != chunk_start or span[1] != min(chunk_start + len(data) - 1, chunk_end):
+                    raise DownloadError(
+                        f"Content-Range mismatch: asked bytes={chunk_start}-{chunk_end}, "
+                        f"got {chunk_headers.get('Content-Range')!r}"
+                    )
                 if not data:
                     break
-                if len(data) > (chunk_end - chunk_start + 1):
-                    # Server ignored this Range too; keep only unseen bytes.
-                    data = data[: (chunk_end - chunk_start + 1)]
                 _write_chunk(data)
                 if total:
                     reporter.fraction(0.05 + 0.85 * received / total)
                 if received >= total:
                     break
-                if len(data) < (chunk_end - chunk_start + 1):
-                    break
+                if len(data) < expect:
+                    raise DownloadError(
+                        f"short range body at byte {chunk_start}: "
+                        f"{len(data)}/{expect} bytes"
+                    )
+            if total and received != total:
+                raise DownloadError(
+                    f"incomplete WC download: {received}/{total} bytes"
+                )
         else:
             # Server ignored Range: the probe response IS the whole file.
             sink.write(probe_head)
@@ -823,14 +1067,6 @@ def download_wechat_encrypted(
         "verified_key": True,
     }
     return target, info
-
-
-_last_http_headers: dict | None = None
-
-
-def _capture_headers(headers: dict):
-    global _last_http_headers
-    _last_http_headers = headers
 
 
 def decrypt_wechat_video(encrypted_path: Path, output_dir: Path, decode_key: str,

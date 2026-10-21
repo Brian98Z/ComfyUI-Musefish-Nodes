@@ -32,7 +32,8 @@ def _binaries() -> tuple[str, str]:
 def _video_info(ffprobe: str, source: Path) -> tuple[int, int, Fraction, int]:
     probe = subprocess.run(
         [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries",
-         "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames", "-of", "json", str(source)],
+         "stream=width,height,r_frame_rate,avg_frame_rate,nb_frames:stream_side_data=rotation",
+         "-of", "json", str(source)],
         capture_output=True, text=True, check=True,
     )
     streams = json.loads(probe.stdout).get("streams", [])
@@ -42,7 +43,21 @@ def _video_info(ffprobe: str, source: Path) -> tuple[int, int, Fraction, int]:
     fps = Fraction(video["r_frame_rate"])
     if fps <= 0:
         raise ValueError("Could not determine source frame rate")
-    return int(video["width"]), int(video["height"]), fps, int(video.get("nb_frames") or 0)
+    width, height = int(video["width"]), int(video["height"])
+    # FFmpeg applies the display matrix while decoding, so a 90/270-rotated
+    # phone clip arrives with swapped dimensions; reshaping the raw bytes with
+    # the unrotated size silently scrambled the picture.
+    rotation = 0
+    for side_data in video.get("side_data_list") or []:
+        if isinstance(side_data, dict) and "rotation" in side_data:
+            try:
+                rotation = int(float(side_data["rotation"]))
+            except (TypeError, ValueError):
+                rotation = 0
+            break
+    if abs(rotation) % 180 == 90:
+        width, height = height, width
+    return width, height, fps, int(video.get("nb_frames") or 0)
 
 
 def _stop(proc: subprocess.Popen | None) -> None:
@@ -110,7 +125,7 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
     @classmethod
     def define_schema(cls) -> io.Schema:
         return io.Schema(
-            node_id="MusefishDLSS5VideoStream",
+            node_id="musefish_dlss5_video_stream",
             display_name="Musefish DLSS5 Video Stream",
             category="Musefish/Video",
             description=("Connect Load Video -> Musefish DLSS5 Video Stream -> Save Video. "
@@ -164,6 +179,9 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
         total_frames = round(duration * fps) if duration else expected_frames
         if not total_frames:
             total_frames = round(video.get_duration() * fps)
+        if not duration and start_time and expected_frames:
+            # A start-only trim decodes to EOF, not to the source's full count.
+            total_frames = max(1, expected_frames - round(start_time * fps))
         if total_frames <= 0:
             raise ValueError("Could not determine video frame count for progress")
         factor, out_w, out_h = _scale_plan(super_resolution, width, height)
@@ -192,7 +210,8 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
             # Rawvideo from stdout enforces backpressure: no decoded batch exists.
             decoder = subprocess.Popen(
                 [ffmpeg, "-v", "error", *trim_start, *trim_duration, "-i", str(source), "-map", "0:v:0",
-                 "-f", "rawvideo", "-pix_fmt", "rgb24", "-vsync", "0", *frame_limit, "-"],
+                 "-fps_mode", "cfr", "-r", str(fps),
+                 "-f", "rawvideo", "-pix_fmt", "rgb24", *frame_limit, "-"],
                 stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             )
             # Input 0 is the frame pipe; input 1 supplies original audio. There
@@ -273,8 +292,7 @@ class MusefishDLSS5VideoStream(io.ComfyNode):
                 raise RuntimeError("Video encoder failed")
             info_w, info_h, encoded_fps, encoded_frames = _video_info(ffprobe, partial)
             if ((info_w, info_h) != (out_w, out_h) or encoded_fps != fps
-                    or encoded_frames != count or (not duration and expected_frames and count != expected_frames)
-                    or partial.stat().st_size == 0):
+                    or encoded_frames != count or partial.stat().st_size == 0):
                 raise RuntimeError(f"Encoded output verification failed: {encoded_frames}/{count} frames")
             partial.replace(target)
             progress.update_absolute(total_frames)

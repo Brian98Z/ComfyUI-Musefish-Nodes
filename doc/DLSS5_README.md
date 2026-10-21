@@ -8,8 +8,8 @@
 ## 这是什么
 
 把 DLSS5Tool 的 NGX Feature 18 封装为两种 ComfyUI 节点：
-`MusefishDLSS5NeuralRender` 处理单图和短视频 IMAGE 帧批次（固定单 worker）；
-`MusefishDLSS5VideoStream` 接收 VIDEO、逐帧处理并返回 VIDEO，
+`musefish_dlss5_neural_render` 处理单图和短视频 IMAGE 帧批次（固定单 worker）；
+`musefish_dlss5_video_stream` 接收 VIDEO、逐帧处理并返回 VIDEO，
 用于高清和长视频。两者都属于 `Musefish/Video`。
 
 ## 文件
@@ -184,12 +184,12 @@ ComfyUI 主进程                           worker 子进程（每个 1 个）
    无整批中间副本），自身峰值内存 ≈ 上游输入批次 + 输出批次。
    上游 VHS_LoadVideo 不设 frame_load_cap 时会把整段视频装进内存，
    长视频请配合 frame_load_cap/skip_first_frames 分段。
-7. IMAGE 节点固定单 worker；长视频请用 `MusefishDLSS5VideoStream`。
+7. IMAGE 节点固定单 worker；长视频请用 `musefish_dlss5_video_stream`。
    改动前的并行性能数据仅作历史对照，旧工作流重新保存时移除旧控件。
 
 ## 高清长视频：单次运行的流式节点
 
-按画布连接：`LoadVideo (VIDEO) → MusefishDLSS5VideoStream (VIDEO) → SaveVideo`。
+按画布连接：`LoadVideo (VIDEO) → musefish_dlss5_video_stream (VIDEO) → SaveVideo`。
 中间节点接受文件支持的 VIDEO（LoadVideo 返回磁盘文件引用），逐帧处理并
 写入 ComfyUI temp 下一个 MP4，再将文件支持的 VIDEO 交给 SaveVideo 保存到
 output。一次运行只保持一个 NGX 会话、两个 RGBA8 共享内存槽和单帧编解码
@@ -264,7 +264,7 @@ IMAGE 节点可接 LoadImage 与短视频帧批次；长视频接上面的三个
 
 ## 验证记录（2026-09-20）
 
-- 8988 实例 API 提交 LoadImage → MusefishDLSS5NeuralRender → SaveImage
+- 8988 实例 API 提交 LoadImage → musefish_dlss5_neural_render → SaveImage
   全链路 success，输出 `output/dlss5_test_00001_.png`。
 - 与原图逐像素对比：54.4% 像素变化 >8/255，mean abs diff 8.18，
   视觉上细节增强符合 Feature 18 预期。
