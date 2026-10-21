@@ -1,9 +1,12 @@
 {
   "name": "musefish-studio-client",
-  "productName": "Musefish Studio",
   "version": "1.7.0",
-  "private": true,
+  "description": "Musefish Studio desktop client",
   "main": "main.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Brian98Z/ComfyUI-Musefish-Nodes.git"
+  },
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win portable --config electron-builder.yml"
@@ -11,5 +14,7 @@
   "devDependencies": {
     "electron": "44.7.0",
     "electron-builder": "^26.0.12"
-  }
+  },
+  "productName": "Musefish Studio",
+  "private": true
 }

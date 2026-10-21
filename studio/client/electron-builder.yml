@@ -5,6 +5,8 @@ appId: studio.musefish.client
 productName: MusefishStudio
 copyright: Musefish Studio
 
+publish: null   # 本地构建，不自动发布；发布走 release 流程手动上传
+
 directories:
   output: ../dist
   buildResources: ../assets
