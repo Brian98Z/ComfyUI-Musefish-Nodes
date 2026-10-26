@@ -193,6 +193,9 @@ textarea{resize:vertical;min-height:60px}
 .job .files a .sz{color:var(--faint);font-size:11px}
 .job .files .file-plain{display:flex;flex-direction:column;gap:3px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;max-width:100%}
 .job .files .file-plain .sz{color:var(--faint);font-size:11px}
+.job .asr-text{margin-top:9px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:rgba(0,0,0,.18);font-size:13px;line-height:1.55;color:var(--fg)}
+.job a[download]{display:inline-flex;align-items:center;gap:6px;color:#9db4ff;font-size:12px;text-decoration:none;border:1px solid var(--border-hi);padding:4px 10px;border-radius:6px;transition:.15s;background:rgba(0,0,0,.2)}
+.job a[download]:hover{border-color:var(--accent);color:#fff}
 .job .files .file-plain .meta{word-break:break-all}
 .job img.thumb{max-width:100%;max-height:190px;margin-top:9px;border-radius:8px;border:1px solid var(--border);display:block;cursor:zoom-in}
 .job img.thumb:active{max-height:none;width:100%}
@@ -308,6 +311,7 @@ main#view-work{flex:1}
 
     <div class="fieldset"><h2>参数</h2><div class="grid" id="params"></div></div>
     <button class="btn" id="btn-run">开始处理</button>
+    <div id="asr-dl-banner"></div>
     <div id="preview"></div>
   </section>
 
@@ -414,6 +418,7 @@ const FEATURES = {
   dlss5_video: { group:"video", label:"DLSS5 视频", accept:"video/*", fileLabel:"视频" },
   pid_video:   { group:"video", label:"PiD 视频超分", accept:"video/*", fileLabel:"视频（转图片序列逐帧超分，回封 MP4 并保留原音频）" },
   universr:    { group:"audio", label:"UniverSR 音频超分", accept:"audio/*", fileLabel:"音频" },
+  asr_transcribe: { group:"audio", label:"语音识别", accept:"audio/*,.wav,.mp3,.flac,.m4a,.ogg", fileLabel:"音频或含音频的文件夹压缩包（单文件识别）" },
   video_download: { group:"misc", label:"视频下载", accept:null, urlBased:true },
   wechat_download: { group:"misc", label:"微信视频号下载", accept:null, urlBased:true },
   file_download: { group:"misc", label:"文件断点续传", accept:null, urlBased:true },
@@ -500,6 +505,12 @@ const SCHEMAS = {
       ["deess","去齿音",true],
       ["seed","种子",0],
       ["download","允许下载缺失模型",false],
+    ]},
+  asr_transcribe: {
+    fields: [
+      ["model","识别引擎",["large-v3-turbo（多语种·推荐）","large-v3（多语种·最强）","small（多语种·最快）","funasr（中文·带标点）"],"large-v3-turbo（多语种·推荐）","wide"],
+      ["lang","语言",["auto（自动）","zh（中文）","yue（粤语）","en（英语）","ja（日语）","ko（韩语）"],"auto（自动）"],
+      ["precision","精度",["float16","int8"],"float16"],
     ]},
   video_download: {
     fields: [
@@ -755,19 +766,102 @@ $("#btn-run").addEventListener("click",async()=>{
     const v = n.type==="checkbox" ? n.checked : (n.value===""?undefined:(isNaN(Number(n.value))||n.dataset.text==="1"?n.value:Number(n.value)));
     params[n.dataset.name] = v;
   });
+  // friendly engine label → engine value understood by the server
+  if(task==="asr_transcribe"){
+    if(typeof params.model==="string"){
+      params.model = params.model.includes("funasr") ? "funasr"
+        : params.model.includes("large-v3-turbo") ? "large-v3-turbo"
+        : params.model.includes("large-v3") ? "large-v3"
+        : "small";
+    }
+    if(typeof params.lang==="string"){
+      const m = params.lang.match(/^([a-z]+)（/);
+      params.lang = m ? m[1] : "auto";
+    }
+  }
   const urlBased = !!FEATURES[task]?.urlBased;
   const body = urlBased ? {task,params} : {task,input_path:inputFile.path,params};
   if(!urlBased && !inputFile){ drop.style.borderColor="var(--err)"; setTimeout(()=>drop.style.borderColor="",900); return; }
   if(urlBased && !params.url && task!=="wechat_download"){ alert(task==="file_download"?"请填写下载链接":"请填写视频链接"); return; }
   const btn = $("#btn-run"); btn.disabled = true;
   try{
-    const r = await fetch("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json","X-Musefish-Client":"1"},
-      body:JSON.stringify(body)});
-    const d = await r.json();
-    if(d.error) alert(d.error);
+    // `body` is a snapshot: after a model download the user may switch tabs —
+    // the retry below must resubmit the ORIGINAL request, not live UI state.
+    for(;;){
+      const r = await fetch("/api/jobs",{method:"POST",headers:{"Content-Type":"application/json","X-Musefish-Client":"1"},
+        body:JSON.stringify(body)});
+      if(r.status===409 && body.task==="asr_transcribe"){
+        const d = await r.json();
+        if(d.model_missing){
+          const ok = await promptAsrDownload(d.model_missing.model, d.model_missing.size_gb);
+          if(ok) continue;  // model ready → resubmit the same snapshot
+        } else if(d.error) alert(d.error);
+      } else {
+        const d = await r.json();
+        if(d.error) alert(d.error);
+      }
+      break;
+    }
     pollJobs();
   } finally { btn.disabled = false; }
 });
+
+// ---- ASR model download banner (confirm → progress → auto re-submit)
+// Each prompt owns its own interval + done flag (no shared global handle:
+// overlapping prompts could otherwise clear each other's timers).
+function promptAsrDownload(model, sizeGb){
+  return new Promise(resolve=>{
+    const box = $("#asr-dl-banner"); box.innerHTML = "";
+    const bar = el("div",{class:"pct"},el("i",{style:"width:0%"}));
+    const info = el("span",{class:"meta"},`识别模型 ${model} 未下载（约 ${sizeGb.toFixed(1)} GB）`);
+    const state = el("span",{class:"meta"},"");
+    const bYes = el("button",{class:"btn sm"},"下载模型");
+    const bNo  = el("button",{class:"btn ghost sm"},"取消");
+    const row = el("div",{class:"asr-dl",style:"display:flex;flex-direction:column;gap:6px;border:1px solid var(--border-hi);border-radius:8px;padding:10px;margin-top:10px"});
+    const line = el("div",{style:"display:flex;gap:8px;align-items:center;flex-wrap:wrap"},info,bYes,bNo);
+    row.append(line, bar, state);
+    box.append(row);
+    let done = false, timer = null;
+    const cleanup = ok => {
+      if(done) return; done = true;
+      if(timer) clearInterval(timer);
+      box.innerHTML = ""; resolve(ok);
+    };
+    bNo.addEventListener("click",()=>cleanup(false));
+    bYes.addEventListener("click",async()=>{
+      bYes.disabled = true; bNo.disabled = true;
+      try{
+        const rs = await fetch("/api/asr/model/download",{method:"POST",headers:{"Content-Type":"application/json","X-Musefish-Client":"1"},
+          body:JSON.stringify({model})});
+        const sd = await rs.json();
+        if(sd.error){ state.textContent = "启动下载失败："+sd.error; return cleanup(false); }
+        if(sd.ready || sd.pct>=100) return cleanup(true);
+      }catch(e){ state.textContent = "启动下载失败："+e; return cleanup(false); }
+      timer = setInterval(async()=>{
+        let s;
+        try{
+          s = await (await fetch(`/api/asr/model/status?model=${encodeURIComponent(model)}`)).json();
+        }catch(e){ return; }
+        if(done) return;
+        if(s.error && s.model===model){ state.textContent = "下载失败："+s.error; return cleanup(false); }
+        // completion is ONLY the target model being ready: pct/finished are a
+        // global slot another prompt could have driven to 100
+        if(s.ready===true){
+          state.textContent = "下载完成";
+          setTimeout(()=>cleanup(true), 600);
+          return;
+        }
+        if(s.active===false && s.model===model && !s.ready){
+          state.textContent = "下载未完成，请重试"; return cleanup(false);
+        }
+        const pct = s.pct!=null ? s.pct.toFixed(1) : "?";
+        const spd = s.speed!=null ? ` · ${(s.speed*1024).toFixed(0)} MB/s` : "";
+        state.textContent = `下载中 ${pct}%（${(s.done_gb||0).toFixed(2)}/${(s.total_gb||sizeGb).toFixed(1)} GB${spd}）`;
+        bar.firstChild.style.width = `${s.pct||0}%`;
+      }, 800);
+    });
+  });
+}
 
 // ---- job monitor
 let lastJobs = [];
@@ -793,6 +887,26 @@ function renderJobCard(j){
     card.append(el("div",{class:"meta"},`下载中 ${j.progress.pct}%${size}${spd}${eta}`));
   }
   if(j.result?.outputs?.length){
+    // ASR jobs: show recognized text inline + a plain-text download; hide the
+    // raw .list link and the annotate shortcut
+    if(j.task==="asr_transcribe" && j.status==="done"){
+      const rows = j.result.asr_rows || [];
+      if(rows.length){
+        const box = el("div",{class:"asr-text"});
+        rows.forEach(r=>{
+          if(rows.length>1){
+            const fn = el("div",{class:"meta",style:"margin-top:6px"},""+r.file);
+            box.append(fn);
+          }
+          box.append(el("div",{style:"white-space:pre-wrap;word-break:break-word;margin-top:2px"},r.text));
+        });
+        card.append(box);
+        const dl = el("a",{href:j.result.outputs[0].url,target:"_blank",
+                           download:"识别结果.txt",
+                           style:"display:inline-block;margin-top:8px"},"⬇ 下载识别文本");
+        card.append(dl);
+      }
+    } else {
     const files = el("div",{class:"files"});
     j.result.outputs.forEach(f=>{
       const label = f.name.split("/").pop();
@@ -813,10 +927,11 @@ function renderJobCard(j){
     card.append(files);
     const img = j.result.outputs.find(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name));
     if(img) card.append(el("img",{class:"thumb",src:img.url,loading:"lazy",title:"点击放大"}));
-    const vid = j.result.outputs.find(f=>/\.mp4$/i.test(f.name));
+    const vid = j.result.outputs.find(f=>/\.(mp4|webm|mov)$/i.test(f.name));
     if(vid) card.append(el("video",{class:"thumb",src:vid.url,controls:"",preload:"metadata"}));
     const aud = j.result.outputs.find(f=>/\.(flac|wav|mp3)$/i.test(f.name));
     if(aud) card.append(el("audio",{src:aud.url,controls:""}));
+    }
   }
   return card;
 }
@@ -839,7 +954,8 @@ async function pollJobs(){
   lastJobs.forEach(j=>{
     seen.add(j.id);
     let card = box.querySelector(`.job[data-jid="${j.id}"]`);
-    const sig = JSON.stringify([j.status, j.progress, j.error, (j.result?.outputs||[]).map(f=>f.url)]);
+    const sig = JSON.stringify([j.status, j.progress, j.error, j.finished,
+                                (j.result?.outputs||[]).map(f=>f.url)]);
     if(card && card.dataset.sig === sig){ prev = card; return; }  // unchanged: keep media element alive
     const fresh = renderJobCard(j);
     fresh.dataset.sig = sig;
@@ -1081,8 +1197,25 @@ document.getElementById("btn-relink").addEventListener("click",async()=>{
 });
 
 renderTabs(); renderParams(); updateDrop(); pollStatus(); pollJobs(); pollLog();
-setInterval(()=>{pollJobs();pollStatus()},2500);
-setInterval(pollLog,3000);
+// single-flight poll loops: never issue the next tick until the previous
+// round finished (a slow response no longer stacks requests or lets an older
+// response land after a newer one)
+let _pollBusy = false;
+async function pollTick(){
+  if(_pollBusy) return;
+  _pollBusy = true;
+  try{ await Promise.all([pollJobs(), pollStatus()]); }
+  finally{ _pollBusy = false; }
+}
+setInterval(pollTick,2500);
+let _logBusy = false;
+async function pollLogTick(){
+  if(_logBusy) return;
+  _logBusy = true;
+  try{ await pollLog(); }
+  finally{ _logBusy = false; }
+}
+setInterval(pollLogTick,3000);
 </script>
 </body>
 </html>

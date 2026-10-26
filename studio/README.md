@@ -4,13 +4,14 @@ ComfyUI-Musefish-Nodes 插件的本地客户端。开箱即用，无需打开 Co
 图片/视频/音频增强与视频下载全部在工作台界面完成。
 
 **功能**：PiD 图片超分 · PiD 视频超分 · DLSS5 图片增强 · DLSS5 视频增强 ·
-UniverSR 音频超分 · 视频下载（通用平台 yt-dlp + 微信视频号内存解密）
+UniverSR 音频超分 · 视频下载（通用平台 yt-dlp + 微信视频号内存解密）·
+语音识别 ASR（与 Studio 主树同引擎代码；统一模型库 `H:\ComfyUI_Mie_2026_V8.0\ComfyUI\models\audio_encoders\faster-whisper`）
 
 ## 架构
 
 ```
 Electron 客户端(client/) ──┐
-浏览器 http://127.0.0.1:17995 ──┴→ Studio 服务(server/, 17995)
+浏览器 http://127.0.0.1:17998 ──┴→ Studio 服务(server/, 17998)
                                         ├→ headless ComfyUI(17996, 隔离 base-directory)
                                         └→ 直连任务(yt-dlp / 微信解密, 不经引擎)
 ```
@@ -31,7 +32,7 @@ Electron 客户端(client/) ──┐
 
 | 目录 | 内容 |
 |---|---|
-| `server/` | Studio HTTP 服务（stdlib，17995）+ ComfyUI 监督器 + 工作流构建 |
+| `server/` | Studio HTTP 服务（stdlib，17998）+ ComfyUI 监督器 + 工作流构建 |
 | `client/` | Electron 壳：健康探测复用既有服务，否则拉起 server |
 | `runtime/` | `python/` 内嵌解释器 junction（`._pth` 约束的兄弟布局） |
 | `comfy/` | 源 ComfyUI 内核 junction（引擎启动入口） |
@@ -72,7 +73,7 @@ start_server.bat                 # 启动服务（或由客户端自动拉起）
 
 ```
 python tools\link_models.py     # 首次：建立全部映射（校验：--check）
-start_server.bat                # 启动：Studio 17995 + headless ComfyUI 17996
+start_server.bat                # 启动：Studio 17998 + headless ComfyUI 17996
 client\start_client.bat         # 桌面客户端（首次需 client\> npm install）
 ```
 

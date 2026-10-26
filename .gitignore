@@ -9,3 +9,6 @@ _dy_cookies.txt
 _yt_cookies.txt
 _wc_url_cache.json
 _ytdlp_update_stamp.json
+
+# Dev-machine junction to D:\MusefishStudio\runtime\venv — never publish
+studio/runtime/

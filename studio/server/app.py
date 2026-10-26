@@ -28,6 +28,8 @@ if str(HERE) not in sys.path:
 
 from comfy_client import ComfyClient, ComfyError
 import workflows
+import asr as _asr
+from asr import StopASR as _asr_StopASR
 ROOT = HERE.parent
 CONFIG = json.loads((HERE / "config.json").read_text("utf-8"))
 
@@ -41,6 +43,11 @@ DATA_DIR = (HERE / CONFIG.get("data_dir", "../data")).resolve()
 UPLOAD_DIR = (HERE / CONFIG.get("upload_dir", "../uploads")).resolve()
 OUTPUT_DIR = (HERE / CONFIG.get("output_dir", "../data/output")).resolve()
 LOG_DIR = (HERE / CONFIG.get("log_dir", "../logs")).resolve()
+# ASR model root: config.asr_models_dir wins; empty → asr.py's resolution
+# chain (env MUSEFISH_ASR_MODELS > ComfyUI folder_paths > <data>/models/asr).
+# Dev machine pins it to the unified ComfyUI library via config.
+if CONFIG.get("asr_models_dir"):
+    _asr.set_models_dir(CONFIG["asr_models_dir"])
 # ComfyUI 引擎目录解析链（首个含 main.py 的生效）：
 #   1. config.comfy_dir        — 显式指定
 #   2. data/comfyui            — 自包含形态（tools/env_setup.py 克隆/安装）
@@ -118,6 +125,11 @@ class ComfySupervisor:
         env = os.environ.copy()
         env["PATH"] = f"{PY.parent};{FFMPEG_DIR};" + env.get("PATH", "")
         env["PYTHONIOENCODING"] = "utf-8"
+        # ASR node's model root: pass through the configured library when the
+        # config pins one (dev machine); otherwise leave unset so the node's
+        # own resolution chain (env > folder_paths > data dir) decides.
+        if CONFIG.get("asr_models_dir"):
+            env["MUSEFISH_ASR_MODELS"] = CONFIG["asr_models_dir"]
         log_file = LOG_DIR / "comfyui.log"
         with open(log_file, "ab") as lf:
             self.proc = subprocess.Popen(
@@ -196,7 +208,7 @@ TASK_BUILDERS = {
     "universr": workflows.universr_graph,
 }
 # Tasks that bypass ComfyUI entirely (plugin python backends run in-process).
-DIRECT_TASKS = {"video_download", "wechat_download", "file_download"}
+DIRECT_TASKS = {"video_download", "wechat_download", "file_download", "asr_transcribe"}
 
 
 def _new_job(task: str, params: dict) -> dict:
@@ -368,10 +380,15 @@ def _worker() -> None:
         job_id = WORK_Q.get()
         with JOBS_LOCK:
             job = JOBS.get(job_id)
-        if job is None:
-            continue
-        job["status"] = "running"
-        job["started"] = time.time()
+            if job is None:
+                continue
+            if job.get("status") == "cancelled":
+                # cancelled while still queued: honor it atomically, never run
+                job["finished"] = time.time()
+                _mark_dirty()
+                continue
+            job["status"] = "running"
+            job["started"] = time.time()
         task = job["task"]
         try:
             if task in DIRECT_TASKS:
@@ -411,6 +428,9 @@ def _worker() -> None:
                 job["status"] = "error"
                 job["error"] = str(e)[:2000]
                 log(f"job {job_id} failed: {str(e)[:300]}")
+        except _asr_StopASR:
+            job["status"] = "cancelled"
+            log(f"job {job_id} cancelled")
         except Exception as e:  # noqa: BLE001
             if job["status"] == "cancelled":
                 log(f"job {job_id} cancelled")
@@ -458,6 +478,8 @@ def _run_direct_task(job: dict) -> None:
         _run_video_download(job, params)
     elif job["task"] == "file_download":
         _run_file_download(job, params)
+    elif job["task"] == "asr_transcribe":
+        _run_asr_transcribe(job, params)
     else:
         raise ValueError(f"unknown direct task {job['task']}")
 
@@ -541,6 +563,93 @@ def _wechat_auto_extract(paste: str, logs: list[str]) -> tuple[str, str]:
     else:
         logs.append("粘贴内容无链接；将按文本匹配微信客户端内存记录")
     return "", ""
+
+
+def _run_asr_transcribe(job: dict, params: dict) -> None:
+    """语音识别 (ported GPT-SoVITS ASR engines, in-process).
+
+    input_path: 一个音频文件或一个装音频的目录；产物 <名称>.list 落
+    OUTPUT_DIR/<job_id>/，可直接在标注页打开。params:
+      model  — faster-whisper 尺寸 (small/large-v3/large-v3-turbo…) 或 "funasr"
+      lang   — auto/en/ja/ko/zh/yue
+      precision — float32/float16/int8
+    """
+    raw = (params.get("input_path") or "").strip().strip('"')
+    src = Path(raw)
+    if not src.is_absolute() or not src.exists():
+        raise ValueError(f"输入不存在: {raw}")
+    _AUDIO_EXT = (".wav", ".mp3", ".flac", ".m4a", ".ogg")
+    if src.is_file() and src.suffix.lower() not in _AUDIO_EXT:
+        raise ValueError(f"仅支持音频文件: {', '.join(_AUDIO_EXT)}")
+    if src.is_dir() and not any(src.glob("*.wav")) and not any(
+            n.suffix.lower() in _AUDIO_EXT for n in src.iterdir() if n.is_file()):
+        raise ValueError("目录内没有音频文件")
+
+    # 单文件 → 建一个只含它的临时目录（引擎按目录枚举）；目录 → 原样
+    import shutil
+    if src.is_file():
+        stage = OUTPUT_DIR / job["id"] / "_input"
+        stage.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, stage / src.name)
+        in_dir = stage
+    else:
+        in_dir = src
+
+    model = (params.get("model") or "large-v3-turbo").strip()
+    lang = (params.get("lang") or "auto").strip().lower()
+    if lang not in ("auto", "zh", "yue", "en", "ja", "ko"):
+        lang = "auto"
+    precision = (params.get("precision") or "float16").strip().lower()
+    if precision not in ("float16", "int8"):  # float32 removed: largest VRAM/space for no visible gain here
+        precision = "float16"
+    out_dir = OUTPUT_DIR / job["id"]
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    def on_line(done: int, total: int) -> None:
+        job["progress"] = {"pct": round(done * 100 / total, 1) if total else None,
+                           "text": f"{done}/{total} 条"}
+
+    def should_stop() -> bool:
+        return job.get("status") == "cancelled"
+
+    log(f"ASR 开始：{in_dir.name} · {model} · {lang} · {precision}")
+    if model == "funasr":
+        # funasr 单模型逐文件（lang 固定 zh/yue）
+        import soundfile  # noqa: F401  fail fast if missing
+        names = sorted(n for n in in_dir.iterdir()
+                       if n.suffix.lower() in (".wav", ".mp3", ".flac", ".m4a", ".ogg"))
+        fun_model = _asr.create_funasr_model("zh" if lang in ("", "auto", "zh") else lang)
+        lines = []
+        total = len(names)
+        for k, n in enumerate(names):
+            if should_stop():
+                raise _asr.StopASR()
+            text = fun_model.generate(input=str(n))[0]["text"]
+            lines.append(f"{n.resolve()}|{in_dir.name}|{'ZH' if lang != 'yue' else 'YUE'}|{text}")
+            on_line(k + 1, total)
+        list_path = out_dir / f"{in_dir.name}.list"
+        list_path.write_text("\n".join(lines), encoding="utf-8")
+    else:
+        list_path = _asr.whisper_execute(
+            str(in_dir), str(out_dir), model, lang, precision,
+            on_line=on_line, should_stop=should_stop)
+    if should_stop():
+        raise _asr.StopASR()  # cancelled during the final file: never report done
+    list_path = Path(list_path)
+    # parse the .list into display rows: wav file name + recognized text
+    rows = []
+    for line in list_path.read_text(encoding="utf-8").splitlines():
+        parts = line.split("|")
+        if len(parts) == 4:
+            rows.append({"file": Path(parts[0]).name, "lang": parts[2], "text": parts[3].strip()})
+    job["result"] = {
+        "outputs": [{"name": list_path.name, "path": str(list_path),
+                     "url": f"/files/{job['id']}/{quote(list_path.name)}",
+                     "bytes": list_path.stat().st_size}],
+        "asr_rows": rows,
+    }
+    job["status"] = "done"
+    log(f"ASR 完成：{list_path} ({len(rows)} 条)")
 
 
 def _run_video_download(job: dict, params: dict) -> None:
@@ -1147,7 +1256,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def _body(self) -> bytes:
         length = int(self.headers.get("Content-Length") or 0)
-        return self.rfile.read(length) if length else b""
+        if length > 32 * 1024 * 1024:  # JSON bodies here are tiny; reject abuse
+            raise ValueError(f"request body too large ({length} bytes)")
+        return self.rfile.read(length) if length > 0 else b""
 
     # ---- request guard
     def _guard(self) -> bool:
@@ -1229,6 +1340,16 @@ class Handler(BaseHTTPRequestHandler):
             elif path.startswith("/api/nodes/"):
                 cls = path.rsplit("/", 1)[1]
                 self._json(client.object_info(cls))
+            elif path == "/api/asr/model/status":
+                # /api/asr/model/status?model=large-v3
+                import asr as _asr
+                qs = self.path.split("?", 1)[1] if "?" in self.path else ""
+                mm = re.search(r"model=([\w\-.]+)", qs)
+                model = mm.group(1) if mm else ""
+                st = _asr.download_state()
+                self._json({"ready": _asr.model_ready(model) if model else None,
+                            "exists": _asr.model_ready(model) if model else None,
+                            **st})
             elif path == "/api/jobs":
                 with JOBS_LOCK:
                     jobs = sorted(JOBS.values(), key=lambda j: j["created"], reverse=True)
@@ -1239,7 +1360,8 @@ class Handler(BaseHTTPRequestHandler):
                 jid = path.rsplit("/", 1)[1]
                 with JOBS_LOCK:
                     job = JOBS.get(jid)
-                    self._json(_job_record(job) if job else {"error": "no such job"}, 200 if job else 404)
+                    rec = _job_record(job) if job else None
+                self._json(rec if rec else {"error": "no such job"}, 200 if rec else 404)
             elif path.startswith("/files/"):
                 rel = unquote(path[len("/files/"):])
                 dest = _contained_output(rel)
@@ -1287,14 +1409,31 @@ class Handler(BaseHTTPRequestHandler):
                 params = dict(req.get("params") or {})
                 if req.get("input_path"):
                     params.setdefault("input_path", req["input_path"])
-                if task not in DIRECT_TASKS and not params.get("input_path"):
+                if (task not in DIRECT_TASKS or task == "asr_transcribe") and not params.get("input_path"):
                     self._json({"error": "input_path required"}, 400)
                     return
                 if task in ("video_download", "file_download") and not params.get("url"):
                     self._json({"error": "url required"}, 400)
                     return
+                if task == "asr_transcribe":
+                    import asr as _asr
+                    m = (params.get("model") or "large-v3-turbo").strip()
+                    if not _asr.model_ready(m):
+                        gb = _asr.WHISPER_SIZES_GB.get(m, _asr._FUNASR_TOTAL_GB)
+                        self._json({
+                            "error": f"识别模型 {m} 尚未下载到本地（约 {gb:.1f} GB）",
+                            "model_missing": {"model": m, "size_gb": gb},
+                        }, 409)
+                        return
                 job = _new_job(task, params)
                 self._json({"job_id": job["id"], "status": job["status"]})
+            elif path == "/api/asr/model/download":
+                import asr as _asr
+                req = json.loads(self._body() or b"{}")
+                try:
+                    self._json(_asr.start_download((req.get("model") or "").strip()))
+                except ValueError as e:
+                    self._json({"error": str(e)}, 400)
             elif path == "/api/comfy/start":
                 self._json(supervisor.start(wait=False))
             elif path == "/api/comfy/stop":
@@ -1395,41 +1534,47 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path.startswith("/api/jobs/"):
             jid = path.rsplit("/", 1)[1]
+            queued_cancelled = False
             with JOBS_LOCK:
                 job = JOBS.get(jid)
-            if not job:
-                self._json({"error": "no such job"}, 404)
-                return
-            if job.get("status") in ("pending", "running"):
-                if not job.get("prompt_id"):
-                    # still queued locally: mark cancelled; worker checks the
-                    # terminal state before submit and skips it
+                if not job:
+                    self._json({"error": "no such job"}, 404)
+                    return
+                if job.get("status") == "pending" and not job.get("prompt_id"):
+                    # still queued locally: mark cancelled INSIDE the lock so the
+                    # worker's atomic dequeue check can never race us
                     job["status"] = "cancelled"
                     _mark_dirty()
                     log(f"job {jid} cancelled before submit")
-                    self._json({"ok": True})
-                    return
-                try:
-                    import urllib.request as _ur
+                    queued_cancelled = True
+            if queued_cancelled:
+                self._json({"ok": True})
+                return
+            # running (or engine-queued): interrupt the engine, then delete from
+            # its queue; status flips to cancelled only if still not terminal
+            try:
+                import urllib.request as _ur
 
-                    req = _ur.Request(
-                        client.base + "/interrupt",
-                        data=b"", method="POST")  # interrupt running execution
-                    _ur.urlopen(req, timeout=10).read()
-                except Exception:
-                    pass  # not the running item on the engine — delete queued
-                try:
-                    import urllib.request as _ur
+                req = _ur.Request(
+                    client.base + "/interrupt",
+                    data=b"", method="POST")  # interrupt running execution
+                _ur.urlopen(req, timeout=10).read()
+            except Exception:
+                pass  # not the running item on the engine — delete queued
+            try:
+                import urllib.request as _ur
 
-                    req = _ur.Request(
-                        client.base + "/queue",
-                        data=json.dumps({"delete": [job["prompt_id"]]}).encode(),
-                        headers={"Content-Type": "application/json"}, method="POST")
-                    _ur.urlopen(req, timeout=10).read()
-                except Exception as e:  # noqa: BLE001
-                    log(f"cancel failed: {e}")
-                job["status"] = "cancelled"
-                _mark_dirty()
+                req = _ur.Request(
+                    client.base + "/queue",
+                    data=json.dumps({"delete": [job["prompt_id"]]}).encode(),
+                    headers={"Content-Type": "application/json"}, method="POST")
+                _ur.urlopen(req, timeout=10).read()
+            except Exception as e:  # noqa: BLE001
+                log(f"cancel failed: {e}")
+            with JOBS_LOCK:
+                if job["status"] not in _TERMINAL:
+                    job["status"] = "cancelled"
+                    _mark_dirty()
             self._json({"ok": True})
         else:
             self._json({"error": "unknown route"}, 404)

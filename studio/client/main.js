@@ -5,11 +5,26 @@ const net = require("net");
 const path = require("path");
 const fs = require("fs");
 
-const ROOT = process.env.MUSEFISH_STUDIO_ROOT
-  // packaged portable: exe sits in <root>/client/; dev: client/ next to server/
-  || (fs.existsSync(path.join(__dirname, "..", "server", "app.py"))
-      ? path.resolve(__dirname, "..")
-      : path.resolve(path.dirname(process.execPath), ".."));
+function resolveRoot() {
+  // electron-builder portable self-extracts to %TEMP%\...: __dirname and
+  // process.execPath both point there, so ROOT must come from
+  // PORTABLE_EXECUTABLE_DIR (the exe's real location). The exe may sit in
+  // <root>\client\ or directly in <root>\; MUSEFISH_STUDIO_ROOT overrides.
+  const candidates = [
+    process.env.MUSEFISH_STUDIO_ROOT,
+    process.env.PORTABLE_EXECUTABLE_DIR,
+    process.env.PORTABLE_EXECUTABLE_DIR
+      ? path.resolve(process.env.PORTABLE_EXECUTABLE_DIR, "..")
+      : null,
+    path.resolve(__dirname, ".."),
+    path.resolve(path.dirname(process.execPath), ".."),
+  ].filter(Boolean);
+  for (const c of candidates) {
+    if (fs.existsSync(path.join(c, "server", "app.py"))) return path.resolve(c);
+  }
+  return path.resolve(path.dirname(process.execPath), "..");
+}
+const ROOT = resolveRoot();
 const SERVER_DIR = path.join(ROOT, "server");
 const SERVER_SCRIPT = path.join(SERVER_DIR, "app.py");
 const PY_CANDIDATES = [
@@ -20,7 +35,7 @@ const PY_CANDIDATES = [
 
 let win = null;
 let serverProc = null;
-let serverPort = 17995;
+let serverPort = 17998;
 let serverUrl = `http://127.0.0.1:${serverPort}/`;
 const APP_ICON = path.join(__dirname, "..", "assets", "icon.ico");
 
@@ -112,10 +127,12 @@ function createWindow() {
     },
   });
   win.setMenuBarVisibility(false);
-  // wait for the HTTP port, then load; retry every 2 s
+  // Wait until the port serves OUR workbench before loading: a bare TCP
+  // check would happily load whatever else grabbed the port (e.g. RVC变声
+  // 工作室 defaults to the same port) into our window.
   const tryLoad = () => {
-    checkPort(serverPort, (up) => {
-      if (up) {
+    probeHealth(serverPort, (ours) => {
+      if (ours) {
         win.loadURL(serverUrl).catch(() => setTimeout(tryLoad, 2000));
       } else if (!win.isDestroyed()) {
         setTimeout(tryLoad, 2000);

@@ -1,6 +1,7 @@
 """Musefish PiD video and UniverSR audio nodes."""
 
 from . import _startup_update  # noqa: F401  (background yt-dlp self-update)
+from .musefish_asr import MusefishASR
 from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel, MusefishUniverSRSpeechAudio
 from .musefish_dlss5 import MusefishDLSS5NeuralRender
 from .musefish_dlss5_stream import MusefishDLSS5VideoStream
@@ -24,6 +25,7 @@ __all__ = [
     "comfy_entrypoint",
     "MusefishExtension",
     "MusefishPiDBatchVideoUpscale",
+    "MusefishASR",
     "MusefishUniverSRGeneralAudio",
     "MusefishUniverSRModel",
     "MusefishUniverSRSpeechAudio",

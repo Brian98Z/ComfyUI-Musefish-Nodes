@@ -2,7 +2,7 @@
 
 [English](README.md) | **简体中文**
 
-按用途选择节点：PiD 视频超分与后处理、DLSS5 图像/流式视频增强、社交平台视频下载、模型/文件直链下载（并发分片 + 断点续传）、UniverSR 音频超分与母带处理。各链路的模型、参数和显存参考不可混用。安装到 `ComfyUI/custom_nodes/ComfyUI-Musefish-Nodes`，在运行 ComfyUI 的 Python 环境安装所需依赖并重启；依赖细节见各分项说明。
+按用途选择节点：PiD 视频超分与后处理、DLSS5 图像/流式视频增强、社交平台视频下载、模型/文件直链下载（并发分片 + 断点续传）、UniverSR 音频超分与母带处理、语音识别转写（ASR）。各链路的模型、参数和显存参考不可混用。安装到 `ComfyUI/custom_nodes/ComfyUI-Musefish-Nodes`，在运行 ComfyUI 的 Python 环境安装所需依赖并重启；依赖细节见各分项说明。
 
 ## 新用户从零安装与首次运行
 
@@ -39,6 +39,7 @@
 | 文件下载：`musefish_file_downloader` | 任意 http(s) 直链（CivitAI b2 / S3 / ModelScope / HF）并发分片下载，按连接限速的 CDN 可吃满带宽；`.part` + state 断点续传，中断后同参重跑即续 | `url`（签名参数整串保留）、`save_dir`（留空=output/musefish）、`conns`（默认 32，最高 64）、`proxy`（自动=先直连再本机代理）、`overwrite`。**HEAD 对签名链接恒 401，用 GET 判断有效性** | [文件下载、续传与代理](doc/FILE_DOWNLOAD_README.md) |
 | 视频下载：`musefish_video_downloader`、`musefish_wc_video_channels` | YouTube/B站/X/抖音/小红书下载及微信视频号本机客户端解密；返回文件支持 VIDEO 和 FPS | `url`、`platform=Auto`、`quality=best`、`chunks`（支持的平台可自动吸附 8）；YouTube/X 需本地代理，YouTube/抖音可能需要本地 cookies；视频号需客户端正在播放目标素材。带 token 的 URL 缓存及 cookie 文件均是凭据，不得上传 | [平台、凭据与解密](doc/VIDEO_DOWNLOAD_README.md) |
 | 音频：`musefish_universr_model`、`musefish_universr_general_audio`、`musefish_universr_speech_audio` | general 音乐/音效超分与母带、speech 语音增强；素材驱动选档和参数；支持分块处理 | 模型目录 `ComfyUI/models/UniverSR/models/huggingface/<general\|speech>`；`download=true` 才下载。新建节点 `auto_params=true`、`input_sr=auto`、`ode_steps=4`、`guidance=1.5`、`chunk_sec=15`、`accel=cuDNN TF32`；显存不足先减小 `chunk_sec`。`stem_mix` 需要两个模型与 Demucs | [UniverSR 与母带](doc/UNIVERSR_README.md) |
+| 语音识别：`musefish_asr` | AUDIO 批次转文本：faster-whisper 多语种（CUDA 批处理管线，large-v3 60s≈7s）与 funasr 中文带标点；模型与 Musefish Studio 共库，缺失自动下载 | `engine`、`language`（仅 whisper 生效）、`precision=int8` 减显存；输出 `text` 与 `.list` 明细（GPT-SoVITS 兼容格式）。is_output_node，可直接执行 | [语音识别](doc/ASR_README.md) |
 
 ## 安装与模型
 
@@ -68,6 +69,7 @@
 
 - PiD/UniverSR 模板中的 16GB 设置是参考值，不保证所有素材不 OOM；PiD 长视频仍占 CPU 内存。DLSS5 长视频应优先用流式 VIDEO 而非整段 IMAGE 批次。
 - 同一段 1080P、22 秒视频放大到 8K：**用户实测 GPU HEVC 79 秒、CPU HEVC 300 秒**；仅作为该素材和设备的对照，非通用速度承诺。[详细质量与编码说明](doc/DLSS5_README.md)。
+- **v1.8.0（2026-10-26）：** 新增 `Musefish ASR` 节点（ID `musefish_asr`，显示名纯英文）——AUDIO 批次转文本：faster-whisper 多语种（CUDA 批处理管线，large-v3-turbo 60s≈7s；16 kHz float32 内存直喂，免临时 wav 落盘解码）与 funasr 中文带标点；模型从与 Studio 工作台共享的统一库解析（`<ComfyUI>/models/audio_encoders/faster-whisper`，env `MUSEFISH_ASR_MODELS` > `folder_paths` > 回退），缺失自动下载（409 → 进度条）。Studio 侧：ASR 转写任务、模型下载/状态端点、标点护栏（`<unk>` 时回退 whisper 原文）、界面单飞轮询、portable exe 经 `PORTABLE_EXECUTABLE_DIR` 解析根目录。[GitHub v1.8.0 release](https://github.com/Brian98Z/ComfyUI-Musefish-Nodes/releases/tag/v1.8.0) 发布未签名 portable `MusefishStudio-Client-1.8.0-win-x64.exe` 与 `SHA256SUMS.txt`。
 - **v1.7.0（2026-10-21）：** 新增 `MusefishFileDownload` 节点（ID `musefish_file_downloader`）——直链/签名 CDN 并发分片下载 + 断点续传，与 Studio 的「文件断点续传」共用 `musefish_fastdl.py`；全部节点 ID 统一为 `musefish_` 前缀。分项要点：
   - **下载器：** 分片级持久检查点、外层重试、重定向跳数上限、连接复用池、续传按远端对象 ETag/大小绑定（签名更新才换 URL）、无 `Content-Length` 时单流兜底、进度不重复计数、保存目录白名单（`allow_any_dir` 需显式开启，另可用 `MUSEFISH_DOWNLOAD_DIRS`）、本机代理自动探测、支持 ComfyUI 取消。
   - **Studio：** 写操作必须带 `X-Musefish-Client: 1`；`/files/` 路径解析后必须落在 output 目录内，非媒体类型按附件返回并加 `nosniff`；恢复任务时校验 id 并清洗产物 URL；`jobs.json` 写入串行化，关停前 join 写线程再做最终落盘。

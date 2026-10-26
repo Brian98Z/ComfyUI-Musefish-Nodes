@@ -1,7 +1,7 @@
 @echo off
 rem ----------------------------------------------------------- Musefish Studio 客户端
 rem 直接调用本地 electron.exe 加载 client/，双击即用，无需 npm。
-rem 服务端由客户端自动拉起（server/app.py，17995）。
+rem 服务端由客户端自动拉起（server/app.py，17998）。
 setlocal
 chcp 65001 >nul
 set "ROOT=%~dp0.."

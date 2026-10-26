@@ -1,18 +1,11 @@
 {
-  "host": "127.0.0.1",
-  "port": 17995,
-  "comfy": {
-    "host": "127.0.0.1",
-    "port": 17996,
-    "autostart": true,
-    "startup_timeout": 300.0
-  },
+  "port": 17998,
   "data_dir": "../data",
   "upload_dir": "../uploads",
   "output_dir": "../data/output",
   "log_dir": "../logs",
-  "cors_origins": [
-    "*"
-  ],
-  "ffmpeg_dir": "H:\\ComfyUI_Mie_2026_V8.0\\ffmpeg\\bin"
+  "comfy": {
+    "port": 17996
+  },
+  "ffmpeg_dir": ""
 }

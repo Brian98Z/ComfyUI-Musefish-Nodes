@@ -1,6 +1,6 @@
 @echo off
 rem ----------------------------------------------------------- Musefish Studio
-rem Musefish 插件本地客户端：Studio 服务(17995) + headless ComfyUI(17996)
+rem Musefish 插件本地客户端：Studio 服务(17998) + headless ComfyUI(17996)
 rem 重量级资产全部经 junction 映射自 H:\ComfyUI_Mie_2026_V8.0，本目录只存薄链接与产物。
 setlocal
 chcp 65001 >nul
