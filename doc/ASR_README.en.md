@@ -3,7 +3,7 @@
 `musefish_asr` — transcribes ComfyUI AUDIO batches to text. The engine code is
 **shared** with Musefish Studio's `server/asr.py` (the node injects the Studio
 server directory at import time; no second copy lives in this repo), and the
-model library is `H:\ComfyUI_Mie_2026_V8.0\ComfyUI\models\audio_encoders\faster-whisper`, so results match the Studio
+model library is `<ComfyUI>/models/audio_encoders/faster-whisper` (or set `MUSEFISH_ASR_MODELS`), so results match the Studio
 workbench exactly.
 
 ## Node

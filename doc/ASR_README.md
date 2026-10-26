@@ -3,7 +3,7 @@
 `musefish_asr` — 把 ComfyUI 的 AUDIO 批次转写成文本。引擎代码与
 [Musefish Studio](../../../MusefishStudio) 的 `server/asr.py` **同源**（节点运行时
 注入 Studio server 目录后 import，插件内不维护第二份实现），模型库共用
-`H:\ComfyUI_Mie_2026_V8.0\ComfyUI\models\audio_encoders\faster-whisper`，与 Studio 工作台的识别结果完全一致。
+`<ComfyUI>/models/audio_encoders/faster-whisper`（也可用环境变量 `MUSEFISH_ASR_MODELS` 指定），与 Studio 工作台的识别结果完全一致。
 
 ## 节点
 
