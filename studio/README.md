@@ -4,7 +4,8 @@ ComfyUI-Musefish-Nodes 插件的本地客户端。开箱即用，无需打开 Co
 图片/视频/音频增强与视频下载全部在工作台界面完成。
 
 **功能**：PiD 图片超分 · PiD 视频超分 · DLSS5 图片增强 · DLSS5 视频增强 ·
-UniverSR 音频超分 · 视频下载（通用平台 yt-dlp + 微信视频号内存解密）·
+UniverSR 音频超分 · AI Mastering 母带（本地 PhaseLimiter，与插件
+`musefish_music_mastering` 节点同引擎代码）· 视频下载（通用平台 yt-dlp + 微信视频号内存解密）·
 语音识别 ASR（与 Studio 主树同引擎代码；统一模型库 `<ComfyUI>/models/audio_encoders/faster-whisper`（`config.asr_models_dir` 可指定））
 
 ## 架构

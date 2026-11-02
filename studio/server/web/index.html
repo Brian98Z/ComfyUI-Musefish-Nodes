@@ -384,7 +384,8 @@ main#view-work{flex:1}
       <h2 style="font-size:16px;letter-spacing:0;text-transform:none;color:var(--fg)">Musefish Studio</h2>
       <div class="meta">
         ComfyUI-Musefish-Nodes 插件的本地客户端，开箱即用，无需打开 ComfyUI 网页端。<br><br>
-        <b>功能</b>：PiD 图片/视频超分 · DLSS5 图片/视频增强 · UniverSR 音频超分 · 视频下载
+        <b>功能</b>：PiD 图片/视频超分 · DLSS5 图片/视频增强 · UniverSR 音频超分 ·
+        AI Mastering 母带（本地混音）· 语音识别 · 视频下载
         （通用平台 + 微信视频号）<br>
         <b>结构</b>：客户端 → 本地工作台服务(:17995) → headless 推理引擎(:17996)<br>
         <b>模型</b>：从工作台 <code>data/models/</code> 统一读取，支持链接映射（零拷贝）或真实文件两种部署<br>
@@ -418,6 +419,7 @@ const FEATURES = {
   dlss5_video: { group:"video", label:"DLSS5 视频", accept:"video/*", fileLabel:"视频" },
   pid_video:   { group:"video", label:"PiD 视频超分", accept:"video/*", fileLabel:"视频（转图片序列逐帧超分，回封 MP4 并保留原音频）" },
   universr:    { group:"audio", label:"UniverSR 音频超分", accept:"audio/*", fileLabel:"音频" },
+  mastering:   { group:"audio", label:"AI Mastering 母带", accept:"audio/*,.wav,.mp3,.flac,.m4a,.ogg,.aac", fileLabel:"音频（母带/响度提升，本地 PhaseLimiter 引擎）" },
   asr_transcribe: { group:"audio", label:"语音识别", accept:"audio/*,.wav,.mp3,.flac,.m4a,.ogg", fileLabel:"音频或含音频的文件夹压缩包（单文件识别）" },
   video_download: { group:"misc", label:"视频下载", accept:null, urlBased:true },
   wechat_download: { group:"misc", label:"微信视频号下载", accept:null, urlBased:true },
@@ -512,6 +514,16 @@ const SCHEMAS = {
       ["lang","语言",["auto（自动）","zh（中文）","yue（粤语）","en（英语）","ja（日语）","ko（韩语）"],"auto（自动）"],
       ["precision","精度",["float16","int8"],"float16"],
     ]},
+  mastering: {
+    fields: [
+      ["mastering_mode","母带算法",["mastering5","mastering3","mastering2","classic"],"mastering5","wide"],
+      ["mastering5_mastering_level","响度提升强度",[0,0.25,0.5,0.75,1],0.5],
+      ["mastering_matching_level","响度匹配度",[0,0.5,0.75,1],1],
+      ["loudness_target","响度统一（目标）",["-14 LUFS（流媒体）","-16 LUFS（播客）","-23 LUFS（广播）","-9 LUFS（高响度）","off（不统一）"],"-14 LUFS（流媒体）"],
+      ["ceiling","真峰上限",["-1 dBTP（推荐）","-2 dBTP（保守）","0 dBTP（不设限）"],"-1 dBTP（推荐）"],
+      ["output_format","输出格式",["wav","mp3","aac"],"wav"],
+      ["bit_depth","位深（WAV）",[16,24],24],
+    ]},
   video_download: {
     fields: [
       ["url","视频链接","textarea",10,"wide"],
@@ -557,6 +569,10 @@ const OPTION_ZH = {
   // UniverSR
   "general":"通用", "speech":"语音", "sr":"超分", "master":"母带",
   "sr_master":"超分 + 母带", "stem_mix":"分轨混合",
+  // AI Mastering 母带
+  "mastering5":"母带 5（最佳音质·最慢）", "mastering3":"母带 3（均衡）",
+  "mastering2":"母带 2（较快）", "classic":"经典算法（最快）",
+  "wav":"WAV 无损", "mp3":"MP3 有损", "aac":"AAC 有损",
   "8000":"8 kHz", "12000":"12 kHz", "16000":"16 kHz", "24000":"24 kHz",
   "mono":"单声道", "stereo":"立体声", "fp32":"最精确", "bf16":"省显存",
   "euler":"欧拉", "midpoint":"中点", "rk4":"RK4",
@@ -620,10 +636,74 @@ $("#groups").addEventListener("click",e=>{
   inputFile = null; updateDrop(); $("#preview").innerHTML="";
 });
 
+// ---- 参数可见性：只显示当前算法/格式下真正生效的项（值仍被记住，切回来即恢复）
+const FIELD_RULES = {
+  mastering: {
+    // 母带5专属：优化器的处理力度（引擎侧仅 mastering5 定义该参数）
+    mastering5_mastering_level: v => v.mastering_mode === "mastering5",
+    // 实测：mastering5/3/2 改动匹配度输出逐项相同（LUFS/LRA/峰均比均无差异），
+    // 只有 classic 的响度匹配真正生效 —— 因此在其他算法下隐藏，避免误调
+    mastering_matching_level: v => v.mastering_mode === "classic",
+    // 位深只对 WAV 有意义，mp3/aac 是恒定码率
+    bit_depth: v => v.output_format === "wav",
+  },
+};
+const PARAM_MEMORY = {};  // "task:field" -> 上次输入值（含当前隐藏项）
+
+function paramValues(){
+  const out = {};
+  document.querySelectorAll("#params [data-name]").forEach(n=>{
+    out[n.dataset.name] = n.type === "checkbox" ? n.checked : n.value;
+  });
+  return out;
+}
+
+function rememberParams(){
+  document.querySelectorAll("#params [data-name]").forEach(n=>{
+    PARAM_MEMORY[task + ":" + n.dataset.name] = n.type === "checkbox" ? n.checked : n.value;
+  });
+}
+
+function applyParamMemory(){
+  document.querySelectorAll("#params [data-name]").forEach(n=>{
+    const v = PARAM_MEMORY[task + ":" + n.dataset.name];
+    if(v === undefined) return;
+    if(n.type === "checkbox") n.checked = !!v;
+    else if(n.tagName === "SELECT"){
+      if([...n.options].some(o => o.value === String(v))) n.value = String(v);
+    } else n.value = v;
+  });
+}
+
+function paramDefaults(){
+  const out = {};
+  (SCHEMAS[task]?.fields || []).forEach(f=>{
+    let [name, _label, kind, def] = f;
+    if(typeof kind === "boolean"){ def = kind; kind = "bool"; }
+    else if(typeof kind === "number" && def === undefined){ def = kind; kind = "num"; }
+    if(Array.isArray(kind)) out[name] = String(def ?? kind[0]);
+    else if(kind === "bool") out[name] = def !== undefined ? !!def : true;
+    else out[name] = String(def ?? kind ?? "");
+  });
+  return out;
+}
+
+// 判定规则要看"当前有效值"：DOM 值 > 记忆值 > 结构默认值（首次渲染 DOM 还是空的）
+function effectiveParams(){
+  const mem = {};
+  Object.keys(PARAM_MEMORY).forEach(k=>{
+    if(k.startsWith(task + ":")) mem[k.slice(task.length + 1)] = PARAM_MEMORY[k];
+  });
+  return Object.assign(paramDefaults(), mem, paramValues());
+}
+
 function renderParams(){
+  const rules = FIELD_RULES[task];
+  const cur = rules ? effectiveParams() : null;
   const box = $("#params"); box.innerHTML = "";
   (SCHEMAS[task]?.fields || []).forEach(f=>{
     let [name,label,kind,def,wide] = f;
+    if(rules && rules[name] && !rules[name](cur)) return;  // 当前算法下不生效
     // compact forms: [name,label,bool] / [name,label,number] / [name,label,min,max]
     if(typeof kind==="boolean"){ def = kind; kind = "bool"; }
     else if(typeof kind==="number" && def===undefined){ def = kind; kind = "num"; }
@@ -681,7 +761,21 @@ function renderParams(){
       box.append(wrap);
     }
   });
+  if(rules) applyParamMemory();   // 重建后恢复用户此前选过的值（含刚从隐藏转为可见的项）
 }
+
+// 切换算法/格式时立刻重排参数：只有可见项集合变化才重建，避免打断输入
+$("#params").addEventListener("change", ()=>{
+  const rules = FIELD_RULES[task];
+  if(!rules) return;
+  rememberParams();
+  const cur = effectiveParams();
+  const wanted = (SCHEMAS[task]?.fields || [])
+    .filter(f => !rules[f[0]] || rules[f[0]](cur)).map(f => f[0]).join("|");
+  const shown = [...document.querySelectorAll("#params [data-name]")]
+    .map(n => n.dataset.name).join("|");
+  if(wanted !== shown) renderParams();
+});
 
 // 文件断点续传：默认保存目录（电脑桌面）与本机已运行的代理客户端
 let dlOptions = null;
@@ -879,12 +973,21 @@ function renderJobCard(j){
   card.append(el("div",{class:"meta"},new Date(j.created*1000).toLocaleString()+queueTxt));
   if(j.error) card.append(el("div",{class:"err"},j.error));
   if(j.status==="running" && j.progress?.pct != null){
-    const spd = j.progress.speed != null ? ` · ${j.progress.speed} MB/s` : "";
-    const size = j.progress.text ? ` · ${j.progress.text.split(" · ")[0]}` : "";
-    const eta = j.progress.eta != null ? ` · 剩余 ${Math.max(1, Math.round(j.progress.eta))}s` : "";
     const bar = el("div",{class:"pct"},el("i",{style:`width:${j.progress.pct}%`}));
     card.append(bar);
-    card.append(el("div",{class:"meta"},`下载中 ${j.progress.pct}%${size}${spd}${eta}`));
+    if(j.progress.stage){
+      // 本地算力任务（AI Mastering 母带）：阶段 + 百分比 + 已耗时
+      const secs = j.progress.elapsed != null ? ` · ${Math.round(j.progress.elapsed)}s` : "";
+      card.append(el("div",{class:"meta"},`${j.progress.label || "处理中"} ${j.progress.pct}% · ${j.progress.stage}${secs}`));
+    } else {
+      const spd = j.progress.speed != null ? ` · ${j.progress.speed} MB/s` : "";
+      const size = j.progress.text ? ` · ${j.progress.text.split(" · ")[0]}` : "";
+      const eta = j.progress.eta != null ? ` · 剩余 ${Math.max(1, Math.round(j.progress.eta))}s` : "";
+      card.append(el("div",{class:"meta"},`下载中 ${j.progress.pct}%${size}${spd}${eta}`));
+    }
+  } else if(j.status==="running" && j.progress?.text){
+    // 无百分比的本地任务（如 AI Mastering 母带）：显示引擎当前阶段与已耗时
+    card.append(el("div",{class:"meta"},j.progress.text));
   }
   if(j.result?.outputs?.length){
     // ASR jobs: show recognized text inline + a plain-text download; hide the
@@ -925,6 +1028,12 @@ function renderJobCard(j){
       }
     });
     card.append(files);
+    if(j.task==="mastering" && j.result.info){
+      const inf = j.result.info, bits = [];
+      if(inf.lufs != null) bits.push(`${inf.lufs} LUFS`);
+      if(inf.true_peak != null) bits.push(`真峰 ${inf.true_peak} dBTP`);
+      if(bits.length) card.append(el("div",{class:"meta"},"实测响度 "+bits.join(" · ")));
+    }
     const img = j.result.outputs.find(f=>/\.(png|jpg|jpeg|webp)$/i.test(f.name));
     if(img) card.append(el("img",{class:"thumb",src:img.url,loading:"lazy",title:"点击放大"}));
     const vid = j.result.outputs.find(f=>/\.(mp4|webm|mov)$/i.test(f.name));
@@ -1115,6 +1224,8 @@ async function loadSettings(){
     row("PyTorch", env.torch, env.torch!=="未知");
     row("CUDA", env.cuda, env.cuda==="可用");
     row("FFmpeg", env.ffmpeg.ok ? "就绪" : "缺失（DLSS5 视频编码需要）", env.ffmpeg.ok);
+    row("AI Mastering 母带", env.mastering?.ok ? "就绪（PhaseLimiter）" : "未找到 — 配置 mastering_dir",
+        !!env.mastering?.ok);
     row("ComfyUI 内核", env.comfy_dir.ok ? "已映射" : "缺失", env.comfy_dir.ok);
     row("Musefish 插件", env.plugin.ok ? "已链接（单一事实源）" : "缺失", env.plugin.ok);
     row("磁盘可用", env.disk_free_gb + " GB", env.disk_free_gb > 5);

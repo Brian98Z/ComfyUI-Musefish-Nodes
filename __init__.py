@@ -6,6 +6,7 @@ from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel,
 from .musefish_dlss5 import MusefishDLSS5NeuralRender
 from .musefish_dlss5_stream import MusefishDLSS5VideoStream
 from .musefish_file_download import MusefishFileDownload
+from .musefish_music_mastering import MusefishMusicMastering
 from .musefish_nodes import (
     AutoBatchAntiflicker,
     AutoBatchImageSharpenFS,
@@ -26,6 +27,7 @@ __all__ = [
     "MusefishExtension",
     "MusefishPiDBatchVideoUpscale",
     "MusefishASR",
+    "MusefishMusicMastering",
     "MusefishUniverSRGeneralAudio",
     "MusefishUniverSRModel",
     "MusefishUniverSRSpeechAudio",

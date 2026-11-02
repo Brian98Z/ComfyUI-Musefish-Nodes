@@ -30,6 +30,7 @@ from .musefish_audio import MusefishUniverSRGeneralAudio, MusefishUniverSRModel,
 from .musefish_dlss5 import MusefishDLSS5NeuralRender
 from .musefish_dlss5_stream import MusefishDLSS5VideoStream
 from .musefish_file_download import MusefishFileDownload
+from .musefish_music_mastering import MusefishMusicMastering
 from .musefish_video_nodes import MusefishVideoDownload, MusefishWeChatChannels
 from .pid_runtime import (
     DEFAULT_ATTENTION_BACKEND,
@@ -987,7 +988,7 @@ class AutoBatchImageSharpenFS(io.ComfyNode):
 class MusefishExtension(ComfyExtension):
     @override
     async def get_node_list(self) -> list[type[io.ComfyNode]]:
-        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS, MusefishUniverSRModel, MusefishUniverSRGeneralAudio, MusefishUniverSRSpeechAudio, MusefishASR, MusefishDLSS5NeuralRender, MusefishDLSS5VideoStream, MusefishVideoDownload, MusefishWeChatChannels, MusefishFileDownload]
+        return [MusefishPiDBatchVideoUpscale, AutoBatchAntiflicker, AutoBatchImageSharpenFS, MusefishUniverSRModel, MusefishUniverSRGeneralAudio, MusefishUniverSRSpeechAudio, MusefishASR, MusefishMusicMastering, MusefishDLSS5NeuralRender, MusefishDLSS5VideoStream, MusefishVideoDownload, MusefishWeChatChannels, MusefishFileDownload]
 
 
 async def comfy_entrypoint() -> MusefishExtension:

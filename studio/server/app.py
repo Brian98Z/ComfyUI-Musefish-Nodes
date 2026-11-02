@@ -7,10 +7,12 @@ not install anything into it.
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import re
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -28,6 +30,7 @@ if str(HERE) not in sys.path:
 
 from comfy_client import ComfyClient, ComfyError
 import workflows
+import proc_tree
 import asr as _asr
 from asr import StopASR as _asr_StopASR
 ROOT = HERE.parent
@@ -51,11 +54,11 @@ if CONFIG.get("asr_models_dir"):
 # ComfyUI 引擎目录解析链（首个含 main.py 的生效）：
 #   1. config.comfy_dir        — 显式指定
 #   2. data/comfyui            — 自包含形态（tools/env_setup.py 克隆/安装）
-#   3. <root>/comfy junction   — 开发机快捷方式（指向外部 ComfyUI 安装）
+#   3. <root>/runtime/ComfyUI junction — 开发机快捷方式（指向外部 ComfyUI 安装）
 _COMFY_CANDIDATES = [
     Path(CONFIG["comfy_dir"]) if CONFIG.get("comfy_dir") else None,
     DATA_DIR / "comfyui",
-    ROOT / "comfy",
+    ROOT / "runtime" / "ComfyUI",
 ]
 COMFY_DIR = next((p for p in _COMFY_CANDIDATES if p and (p / "main.py").is_file()),
                  _COMFY_CANDIDATES[1])
@@ -70,6 +73,16 @@ _FFMPEG_CANDIDATES = [
 ]
 FFMPEG_DIR = next((p for p in _FFMPEG_CANDIDATES if p and (p / "ffmpeg.exe").is_file()),
                   _FFMPEG_CANDIDATES[-1])
+# AI Mastering（本地混音 / PhaseLimiter）: 引擎定位、命令行、响度测量与转码全部
+# 在 mastering.py —— Studio 任务与 ComfyUI 节点（musefish_music_mastering）共用这一份实现。
+import mastering as _mastering
+
+_MASTERING_ENV = _mastering._MASTERING_ENV
+
+
+def mastering_install() -> dict:
+    """PhaseLimiter 安装信息（含 ok/exe/cache/reference/gui），见 mastering.install。"""
+    return _mastering.install()
 
 for d in (DATA_DIR, UPLOAD_DIR, OUTPUT_DIR, LOG_DIR):
     d.mkdir(parents=True, exist_ok=True)
@@ -137,6 +150,8 @@ class ComfySupervisor:
                 stdout=lf, stderr=subprocess.STDOUT,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
+        # Windows: tie the engine to this server so a hard kill cannot orphan it
+        proc_tree.join(self.proc)
         log(f"ComfyUI starting (pid {self.proc.pid}, port {COMFY_PORT})")
 
     def start(self, wait: bool = True) -> dict:
@@ -166,24 +181,36 @@ class ComfySupervisor:
             self.want_running = False
             p, self.proc = self.proc, None
         if p and p.poll() is None:
-            subprocess.run(["taskkill", "/pid", str(p.pid), "/T", "/F"],
-                           capture_output=True)
+            proc_tree.kill_tree(p, timeout=15, log=log)
             log("ComfyUI stopped")
         return {"running": False}
 
     def watchdog(self) -> None:
+        # 无退避的重启循环会在 ComfyUI 一启动就退出（端口被占/配置错）时每 5 秒
+        # 重拉一次：刷日志、反复创建进程。失败按 5→10→20→40→60 秒退避，健康即复位。
+        delay, failures = 5.0, 0
         while True:
-            time.sleep(5)
-            if self.want_running and not client.alive():
-                with self.lock:
-                    if self.proc and self.proc.poll() is None:
-                        continue
-                    if self.want_running:
-                        log("ComfyUI is down; restarting")
-                        try:
-                            self._spawn()
-                        except Exception as e:  # noqa: BLE001
-                            log(f"restart failed: {e}")
+            time.sleep(delay)
+            if not self.want_running:
+                delay = 5.0
+                continue
+            if client.alive():
+                failures, delay = 0, 5.0
+                continue
+            with self.lock:
+                if self.proc and self.proc.poll() is None:
+                    delay = 5.0
+                    continue
+                if not self.want_running:
+                    continue
+                note = f" (attempt {failures + 1})" if failures else ""
+                log(f"ComfyUI is down; restarting{note}")
+                try:
+                    self._spawn()
+                except Exception as e:  # noqa: BLE001
+                    log(f"restart failed: {e}")
+            failures += 1
+            delay = min(5.0 * (2 ** min(failures, 4)), 60.0)
 
 
 supervisor = ComfySupervisor()
@@ -208,7 +235,10 @@ TASK_BUILDERS = {
     "universr": workflows.universr_graph,
 }
 # Tasks that bypass ComfyUI entirely (plugin python backends run in-process).
-DIRECT_TASKS = {"video_download", "wechat_download", "file_download", "asr_transcribe"}
+DIRECT_TASKS = {"video_download", "wechat_download", "file_download", "asr_transcribe",
+                "mastering"}
+# Direct tasks that consume an uploaded file (everything else takes a URL).
+UPLOAD_TASKS = {"asr_transcribe", "mastering"}
 
 
 def _new_job(task: str, params: dict) -> dict:
@@ -480,6 +510,8 @@ def _run_direct_task(job: dict) -> None:
         _run_file_download(job, params)
     elif job["task"] == "asr_transcribe":
         _run_asr_transcribe(job, params)
+    elif job["task"] == "mastering":
+        _run_mastering(job, params)
     else:
         raise ValueError(f"unknown direct task {job['task']}")
 
@@ -650,6 +682,55 @@ def _run_asr_transcribe(job: dict, params: dict) -> None:
     }
     job["status"] = "done"
     log(f"ASR 完成：{list_path} ({len(rows)} 条)")
+
+
+def _run_mastering(job: dict, params: dict) -> None:
+    """AI Mastering 任务外壳：解析输入、调用共享引擎 mastering.run、登记产物。
+
+    引擎细节（44.1 kHz 立体声、恒出 WAV 再转 mp3/aac、随机优化器、取消按进程树
+    杀）全部在 server/mastering.py —— ComfyUI 节点 musefish_music_mastering 复用同一
+    实现，两条路径不会漂移。
+    """
+    src = _resolve_input(params.get("input_path") or "")
+    fmt = _mastering.normalize_params(params)["format"]
+    job_dir = OUTPUT_DIR / job["id"]
+    job_dir.mkdir(parents=True, exist_ok=True)
+    dest = job_dir / f"{src.stem}_mastered.{fmt}"
+
+    started = time.time()
+
+    def on_progress(done: int, total: int, label: str) -> None:
+        """引擎阶段 → 任务卡片进度（百分比 + 阶段 + 已耗时）。"""
+        job["progress"] = {
+            "pct": round(done * 100 / max(total, 1)),
+            "label": "母带处理",
+            "stage": label,
+            "elapsed": round(time.time() - started, 1),
+        }
+
+    info = _mastering.run(
+        src, dest, params, workdir=job_dir, log=log,
+        on_progress=on_progress,
+        is_cancelled=lambda: job.get("status") == "cancelled",
+    )
+    if info["cancelled"]:
+        log(f"job {job['id']} 已取消（AI Mastering 进程树终止）")
+        return
+
+    size = info["bytes"]
+    job["result"] = {
+        "outputs": [{
+            "name": dest.name,
+            "path": str(dest),
+            "url": f"/files/{job['id']}/{quote(dest.name)}",
+            "bytes": size,
+        }],
+        "info": {k: info[k] for k in ("mode", "format", "bit_depth", "seconds",
+                                      "loudness_target", "ceiling", "lufs", "true_peak")},
+    }
+    job["status"] = "done"
+    log(f"AI Mastering 完成：{dest.name} ({size / 1048576:.1f} MB, "
+        f"{info['seconds']:.0f}s){_mastering.loudness_summary(info)}")
 
 
 def _run_video_download(job: dict, params: dict) -> None:
@@ -978,7 +1059,7 @@ def list_models(kind: str) -> list[dict]:
 def check_links_inline() -> dict:
     targets = {
         "runtime/python": ROOT / "runtime" / "python",
-        "comfy": ROOT / "comfy",
+        "runtime/ComfyUI": ROOT / "runtime" / "ComfyUI",
         "custom_node": DATA_DIR / "custom_nodes" / "ComfyUI-Musefish-Nodes",
         "models/dlss5": DATA_DIR / "models" / "dlss5",
         "models/UniverSR": DATA_DIR / "models" / "UniverSR",
@@ -1056,26 +1137,42 @@ def scan_comfy_ports(timeout: float = 0.35) -> list[dict]:
     return found
 
 
-def env_info() -> dict:
-    """Runtime environment snapshot for the Settings page."""
-    py = PY
+_TORCH_CACHE: dict = {"at": 0.0, "torch": "未知", "cuda": "未知"}
+
+
+def _torch_info() -> tuple[str, str]:
+    """(torch version, CUDA availability) — cached: a probe costs a full import."""
+    now = time.time()
+    if now - _TORCH_CACHE["at"] < 300 and _TORCH_CACHE["torch"] != "未知":
+        return _TORCH_CACHE["torch"], _TORCH_CACHE["cuda"]
     torch = cuda = "未知"
     try:
         out = subprocess.run(
-            [str(py), "-c", "import torch;print(torch.__version__);print(torch.cuda.is_available())"],
-            capture_output=True, text=True, timeout=60)
+            [str(PY), "-c", "import torch;print(torch.__version__);print(torch.cuda.is_available())"],
+            capture_output=True, text=True, timeout=120,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         if out.returncode == 0:
             lines = out.stdout.split()
             torch = lines[0] if lines else torch
             cuda = "可用" if lines[-1] == "True" else "不可用"
     except Exception:  # noqa: BLE001
         pass
+    _TORCH_CACHE.update({"at": now, "torch": torch, "cuda": cuda})
+    return torch, cuda
+
+
+def env_info() -> dict:
+    """Runtime environment snapshot for the Settings page."""
+    py = PY
+    torch, cuda = _torch_info()
     ffmpeg = (FFMPEG_DIR / "ffmpeg.exe").is_file()
     disk = shutil.disk_usage(ROOT)
+    mastering = mastering_install()
     return {
         "python": {"path": str(py), "ok": py.is_file()},
         "torch": torch, "cuda": cuda,
         "ffmpeg": {"ok": ffmpeg, "dir": str(FFMPEG_DIR)},
+        "mastering": {k: mastering.get(k) for k in ("ok", "dir", "exe", "gui", "hint")},
         "comfy_dir": {"ok": (COMFY_DIR / "main.py").is_file(), "path": str(COMFY_DIR)},
         "plugin": {"ok": (DATA_DIR / "custom_nodes/ComfyUI-Musefish-Nodes/__init__.py").is_file(),
                    "path": str(DATA_DIR / "custom_nodes/ComfyUI-Musefish-Nodes")},
@@ -1409,8 +1506,16 @@ class Handler(BaseHTTPRequestHandler):
                 params = dict(req.get("params") or {})
                 if req.get("input_path"):
                     params.setdefault("input_path", req["input_path"])
-                if (task not in DIRECT_TASKS or task == "asr_transcribe") and not params.get("input_path"):
+                if (task not in DIRECT_TASKS or task in UPLOAD_TASKS) and not params.get("input_path"):
                     self._json({"error": "input_path required"}, 400)
+                    return
+                if task == "mastering" and not mastering_install()["ok"]:
+                    self._json({
+                        "error": "未找到 AI Mastering 精简引擎（engines/mastering）。请确认该目录"
+                                 "完整，或在 server/config.json 的 mastering_dir / 环境变量 "
+                                 "MUSEFISH_MASTERING_DIR 指定引擎目录。",
+                        "mastering_missing": mastering_install(),
+                    }, 409)
                     return
                 if task in ("video_download", "file_download") and not params.get("url"):
                     self._json({"error": "url required"}, 400)
@@ -1448,10 +1553,19 @@ class Handler(BaseHTTPRequestHandler):
             elif path == "/api/env/setup":
                 # one-shot env prep: venv + deps + ComfyUI core (long: pip ~GBs)
                 # run detached; progress lands in the server log, poll /api/env
+                running = _env_setup_proc.get("proc")
+                if running is not None and running.poll() is None:
+                    # a second run would overwrite the handle and race the same
+                    # venv with two pip processes (corrupted install)
+                    self._json({"ok": False, "already_running": True,
+                                "error": "环境准备已在运行中"}, 409)
+                    return
                 proc = subprocess.Popen(
                     [str(PY), str(ROOT / "tools" / "env_setup.py")],
                     cwd=str(ROOT), stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                    text=True, encoding="utf-8", errors="replace")
+                    text=True, encoding="utf-8", errors="replace",
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+                proc_tree.join(proc)
                 _env_setup_proc["proc"] = proc
                 _env_setup_proc["tail"] = []
                 def _pump_envsetup():
@@ -1656,6 +1770,29 @@ class Handler(BaseHTTPRequestHandler):
         final = UPLOAD_DIR / f"{time.strftime('%Y%m%d_%H%M%S')}_{uuid.uuid4().hex[:8]}_{safe}"
         os.replace(tmp_path, final)
         return {"path": str(final), "name": final.name, "bytes": final.stat().st_size}
+class StudioHTTPServer(ThreadingHTTPServer):
+    # 必须在 bind 前生效：Windows 的 SO_REUSEADDR 允许任何进程再绑同一端口，
+    # 事后改实例属性没用（socket 已带 SO_REUSEADDR）。关掉它，抢占端口会直接失败。
+    allow_reuse_address = False
+    daemon_threads = True
+
+
+def _shutdown_children(signum=None, _frame=None) -> None:
+    """Stop the engine (and its tree) on the paths Python can still run code on."""
+    try:
+        supervisor.stop()
+    except Exception:  # noqa: BLE001
+        pass
+    proc = _env_setup_proc.get("proc")
+    if proc is not None and proc.poll() is None:
+        try:
+            proc_tree.kill_tree(proc, timeout=10, log=log)
+        except Exception:  # noqa: BLE001
+            pass
+    if signum is not None:
+        raise SystemExit(0)
+
+
 def main() -> None:
     # Refuse to double-start: if the port already serves OUR workbench, exit
     # so the new copy never fights the old one for requests (random routing).
@@ -1693,14 +1830,25 @@ def main() -> None:
             except Exception as e:  # noqa: BLE001
                 log(f"autostart failed: {e}")
         threading.Thread(target=boot, daemon=True).start()
-    httpd = ThreadingHTTPServer((HOST, PORT), Handler)
-    httpd.allow_reuse_address = False  # refuse double-bind: two servers on one port = random routing
+    httpd = StudioHTTPServer((HOST, PORT), Handler)
     print(json.dumps({"server_port": PORT}), flush=True)  # client discovery
+    # Graceful stop paths: client close sends taskkill (hard kill — covered by the
+    # kill-on-close job), Ctrl+C and `taskkill` without /F deliver signals we can
+    # still catch, and interpreter exit runs atexit.
+    for signame in ("SIGTERM", "SIGINT", "SIGBREAK"):
+        sig = getattr(signal, signame, None)
+        if sig is not None:
+            try:
+                signal.signal(sig, _shutdown_children)
+            except (OSError, ValueError):
+                pass
+    atexit.register(_shutdown_children)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
-        supervisor.stop()
+        pass
     finally:
+        _shutdown_children()
         _PERSIST["stop"].set()
         _PERSIST["dirty"].set()
         persist_thread.join(timeout=5.0)   # the writer finishes before the last flush
